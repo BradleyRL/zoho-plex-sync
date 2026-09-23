@@ -38,9 +38,15 @@ class GrantService:
             logger.error(f"Failed to write grants data file {self.file_path}: {e}")
 
     def add_temporary_pass(self, email: str, days: int = 2, reference_time: Optional[datetime] = None) -> Dict[str, Any]:
-        """Adds a temporary pass valid for `days` days (default: 2 days)."""
+        """Adds a temporary pass valid for `days` days (default: 2 days, or 3 days if granted on Friday)."""
         email_clean = email.strip().lower()
         now = reference_time if reference_time is not None else datetime.now()
+
+        # If granted on Friday (weekday == 4) and default days == 2, extend to 3 days to cover weekend
+        if now.weekday() == 4 and days == 2:
+            days = 3
+            logger.info(f"Granted on Friday: automatically extending temporary pass for '{email_clean}' to 3 days (covers full weekend).")
+
         expires_at = now + timedelta(days=days)
 
         data = self._load_data()

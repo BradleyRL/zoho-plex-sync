@@ -2,7 +2,7 @@
 
 Script en Python que sincroniza las facturas vencidas de **Zoho Books** (con mora mayor a 3 días) con el control de acceso a librerías de usuarios en **Plex Media Server**.
 
-Permite además gestionar pases temporales por 2 días, pases permanentes, restituir accesos por número de factura recurrente y listar usuarios compartidos en Plex que no posean una suscripción activa.
+Permite además gestionar pases temporales por 2 días (o 3 días si se otorga un Viernes para cubrir el fin de semana completo), pases permanentes, restituir accesos por número de factura recurrente y listar usuarios compartidos en Plex que no posean una suscripción activa.
 
 ---
 
@@ -14,7 +14,7 @@ Permite además gestionar pases temporales por 2 días, pases permanentes, resti
    - Genera logs diarios en `logs/disabled_users_YYYY-MM-DD.log`.
 
 2. **4 Opciones de Gestión de Accesos por CLI**:
-   - **`--grant-temp EMAIL [--days 2]`**: Otorga acceso temporal por 2 días. Al vencer los 2 días, el script revoca el acceso automáticamente.
+   - **`--grant-temp EMAIL [--days 2]`**: Otorga acceso temporal por 2 días. **Si se otorga un Viernes, se extiende automáticamente a 3 días para cubrir todo el fin de semana hasta el Lunes**. Al vencer el pase, el script revoca el acceso automáticamente.
    - **`--grant-invoice RECURRING_INVOICE_NUM`**: Busca el número de factura recurrente en Zoho Books y le restituye el acceso al usuario.
    - **`--grant-permanent EMAIL`**: Otorga acceso permanente y omite la suspensión por mora.
    - **`--list-inactive-plex`**: Muestra una lista de los usuarios de Plex que **NO** tienen una factura recurrente activa en Zoho Books.
@@ -65,8 +65,8 @@ OVERDUE_DAYS_THRESHOLD=3
 # Validar configuración
 python3 main.py --check-config
 
-# 1. Acceso temporal por 2 días
-python3 main.py --grant-temp usuario@ejemplo.com --days 2
+# 1. Acceso temporal (2 días entre semana, 3 días si se otorga un Viernes)
+python3 main.py --grant-temp usuario@ejemplo.com
 
 # 2. Restablecer acceso enviando el # de factura recurrente de Zoho
 python3 main.py --grant-invoice REC-INV-1002

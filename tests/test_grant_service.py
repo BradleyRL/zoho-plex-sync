@@ -6,6 +6,7 @@ def test_temporary_pass_lifecycle(tmp_path):
     data_file = tmp_path / "grants.json"
     service = GrantService(file_path=data_file)
 
+    # Wednesday Sep 23, 2026
     now = datetime(2026, 9, 23, 10, 0, 0)
     
     # 1. Add 2-day temporary pass
@@ -27,6 +28,21 @@ def test_temporary_pass_lifecycle(tmp_path):
     # 5. Second check after cleanup returns empty list
     expired_list_2 = service.get_expired_temporary_passes(reference_time=expired_time)
     assert expired_list_2 == []
+
+def test_friday_temporary_pass_extended_to_3_days(tmp_path):
+    data_file = tmp_path / "grants.json"
+    service = GrantService(file_path=data_file)
+
+    # Friday Sep 25, 2026
+    friday = datetime(2026, 9, 25, 15, 0, 0)
+    assert friday.weekday() == 4 # Friday
+
+    pass_info = service.add_temporary_pass("weekend_user@example.com", days=2, reference_time=friday)
+    
+    # Automatically extended to 3 days to cover full weekend
+    assert pass_info["days"] == 3
+    expires_at = datetime.fromisoformat(pass_info["expires_at"])
+    assert expires_at == datetime(2026, 9, 28, 15, 0, 0) # Monday
 
 def test_permanent_pass_lifecycle(tmp_path):
     data_file = tmp_path / "grants.json"
