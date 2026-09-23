@@ -180,6 +180,7 @@ class ZohoBooksService:
     ) -> List[Dict[str, Any]]:
         """
         Processes overdue invoices and aggregates users with invoices overdue by more than `days_threshold`.
+        Includes primary and all secondary/additional contact person emails for each customer.
         Returns a list of dicts:
         [
             {
@@ -208,36 +209,41 @@ class ZohoBooksService:
             if days_overdue <= days_threshold:
                 continue
 
-            email = inv.get("email") or inv.get("customer_email")
             customer_id = inv.get("customer_id")
+            invoice_num = inv.get("invoice_number", "UNKNOWN")
 
-            # Fallback to fetch email from contact if not in invoice object
-            if not email and customer_id:
-                email = self.fetch_contact_email(customer_id)
+            # Collect primary + all secondary contact person emails for this customer
+            target_emails: set[str] = set()
+            primary_email = inv.get("email") or inv.get("customer_email")
+            if primary_email:
+                target_emails.add(primary_email.strip().lower())
 
-            if not email:
+            if customer_id:
+                contact_emails = self.fetch_all_contact_emails(customer_id)
+                target_emails.update(contact_emails)
+
+            if not target_emails:
                 logger.warning(
-                    f"Invoice {inv.get('invoice_number')} is {days_overdue} days overdue, "
+                    f"Invoice {invoice_num} is {days_overdue} days overdue, "
                     f"but no email address found for customer '{inv.get('customer_name')}'."
                 )
                 continue
 
-            email_clean = email.strip().lower()
-            invoice_num = inv.get("invoice_number", "UNKNOWN")
-
-            if email_clean not in user_map:
-                user_map[email_clean] = {
-                    "email": email_clean,
-                    "customer_name": inv.get("customer_name", "Unknown"),
-                    "customer_id": customer_id,
-                    "invoice_numbers": [invoice_num],
-                    "max_days_overdue": days_overdue
-                }
-            else:
-                user_map[email_clean]["invoice_numbers"].append(invoice_num)
-                user_map[email_clean]["max_days_overdue"] = max(
-                    user_map[email_clean]["max_days_overdue"], days_overdue
-                )
+            for email_clean in target_emails:
+                if email_clean not in user_map:
+                    user_map[email_clean] = {
+                        "email": email_clean,
+                        "customer_name": inv.get("customer_name", "Unknown"),
+                        "customer_id": customer_id,
+                        "invoice_numbers": [invoice_num],
+                        "max_days_overdue": days_overdue
+                    }
+                else:
+                    if invoice_num not in user_map[email_clean]["invoice_numbers"]:
+                        user_map[email_clean]["invoice_numbers"].append(invoice_num)
+                    user_map[email_clean]["max_days_overdue"] = max(
+                        user_map[email_clean]["max_days_overdue"], days_overdue
+                    )
 
         return list(user_map.values())
 

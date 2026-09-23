@@ -47,15 +47,16 @@ def test_get_users_to_disable_filters_threshold():
     ]
 
     with patch.object(service, 'get_overdue_invoices', return_value=mock_invoices):
-        ref_date = date(2026, 9, 23)
-        result = service.get_users_to_disable(days_threshold=3, reference_date=ref_date)
+        with patch.object(service, 'fetch_all_contact_emails', return_value=[]):
+            ref_date = date(2026, 9, 23)
+            result = service.get_users_to_disable(days_threshold=3, reference_date=ref_date)
 
-        # Only user1 should be returned, with 2 invoices aggregated
-        assert len(result) == 1
-        u1 = result[0]
-        assert u1["email"] == "user1@example.com"
-        assert sorted(u1["invoice_numbers"]) == ["INV-001", "INV-003"]
-        assert u1["max_days_overdue"] == 8
+            # Only user1 should be returned, with 2 invoices aggregated
+            assert len(result) == 1
+            u1 = result[0]
+            assert u1["email"] == "user1@example.com"
+            assert sorted(u1["invoice_numbers"]) == ["INV-001", "INV-003"]
+            assert u1["max_days_overdue"] == 8
 
 def test_get_active_recurring_invoice_emails():
     mock_cfg = MagicMock()
