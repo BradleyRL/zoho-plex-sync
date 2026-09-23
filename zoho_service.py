@@ -118,36 +118,47 @@ class ZohoBooksService:
 
     def get_overdue_invoices(self) -> List[Dict[str, Any]]:
         """
-        Fetches all overdue invoices from Zoho Books (handling pagination).
+        Fetches all unpaid & overdue invoices from Zoho Books (handling pagination).
+        Queries both 'overdue' and 'unpaid' statuses to ensure no past-due invoice is missed.
         """
         url = f"{self.cfg.ZOHO_BOOKS_API_URL}/invoices"
-        page = 1
-        all_invoices = []
+        invoice_map: Dict[str, Dict[str, Any]] = {}
 
-        while True:
-            params = {
-                "organization_id": self.cfg.ZOHO_ORGANIZATION_ID,
-                "status": "overdue",
-                "page": page,
-                "per_page": 200
-            }
-            logger.info(f"Fetching overdue invoices from Zoho Books (Page {page})...")
-            resp = requests.get(url, headers=self.get_headers(), params=params, timeout=30)
-            resp.raise_for_status()
-            data = resp.json()
+        # Query both 'overdue' and 'unpaid' (which includes sent & partially_paid)
+        for status_filter in ["overdue", "unpaid"]:
+            page = 1
+            while True:
+                params = {
+                    "organization_id": self.cfg.ZOHO_ORGANIZATION_ID,
+                    "status": status_filter,
+                    "page": page,
+                    "per_page": 200
+                }
+                logger.info(f"Fetching '{status_filter}' invoices from Zoho Books (Page {page})...")
+                try:
+                    resp = requests.get(url, headers=self.get_headers(), params=params, timeout=30)
+                    resp.raise_for_status()
+                    data = resp.json()
 
-            if data.get("code") != 0:
-                raise RuntimeError(f"Zoho API returned error code {data.get('code')}: {data.get('message')}")
+                    if data.get("code") != 0:
+                        logger.error(f"Zoho API returned error code {data.get('code')}: {data.get('message')}")
+                        break
 
-            invoices = data.get("invoices", [])
-            all_invoices.extend(invoices)
+                    invoices = data.get("invoices", [])
+                    for inv in invoices:
+                        inv_id = inv.get("invoice_id") or inv.get("invoice_number")
+                        if inv_id and inv_id not in invoice_map:
+                            invoice_map[inv_id] = inv
 
-            page_context = data.get("page_context", {})
-            if not page_context.get("has_more_page", False):
-                break
-            page += 1
+                    page_context = data.get("page_context", {})
+                    if not page_context.get("has_more_page", False):
+                        break
+                    page += 1
+                except Exception as e:
+                    logger.error(f"Error fetching '{status_filter}' invoices from Zoho Books: {e}")
+                    break
 
-        return all_invoices
+        return list(invoice_map.values())
 
     @staticmethod
     def calculate_days_overdue(due_date_str: str, reference_date: Optional[date] = None) -> int:

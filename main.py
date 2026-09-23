@@ -52,6 +52,11 @@ def parse_args():
         action="store_true",
         help="Opción 4: List Plex users who do NOT have an ACTIVE recurring invoice in Zoho Books."
     )
+    parser.add_argument(
+        "--show-invoices",
+        action="store_true",
+        help="Debug: Fetch and display all unpaid/overdue invoices from Zoho Books."
+    )
 
     # General options
     parser.add_argument(
@@ -195,6 +200,42 @@ def handle_list_inactive_plex(zoho_service: ZohoBooksService, plex_service: Plex
         print(f"{user['email']:<35} | {user['username']:<20} | {user['reason']}")
     print("-" * 80 + "\n")
 
+def handle_show_invoices(zoho_service: ZohoBooksService, threshold: int):
+    """Debug: Displays all unpaid/overdue invoices retrieved from Zoho Books."""
+    logger.info("[DEBUG] Fetching all unpaid & overdue invoices from Zoho Books...")
+    try:
+        invoices = zoho_service.get_overdue_invoices()
+    except Exception as e:
+        logger.error(f"Failed to fetch invoices: {e}")
+        sys.exit(1)
+
+    if not invoices:
+        logger.info("No unpaid/overdue invoices found in Zoho Books.")
+        sys.exit(0)
+
+    print(f"\nFound {len(invoices)} total unpaid/overdue invoice(s) in Zoho Books:\n")
+    print(f"{'INVOICE #':<15} | {'CUSTOMER':<20} | {'EMAIL':<30} | {'DUE DATE':<10} | {'DAYS OVERDUE':<12} | {'> 3 DAYS?'}")
+    print("-" * 110)
+
+    for inv in invoices:
+        num = inv.get("invoice_number", "UNKNOWN")
+        name = inv.get("customer_name", "Unknown")[:20]
+        email = inv.get("email") or inv.get("customer_email") or "(No Email)"
+        email = email[:30]
+        due_date = inv.get("due_date", "N/A")
+        
+        days_overdue = 0
+        if due_date != "N/A":
+            try:
+                days_overdue = zoho_service.calculate_days_overdue(due_date)
+            except Exception:
+                pass
+
+        is_overdue_threshold = "YES (MATCH)" if days_overdue > threshold else f"NO (<= {threshold}d)"
+        print(f"{num:<15} | {name:<20} | {email:<30} | {due_date:<10} | {days_overdue:<12} | {is_overdue_threshold}")
+
+    print("-" * 110 + "\n")
+
 def main():
     args = parse_args()
 
@@ -255,6 +296,11 @@ def main():
             plex_service=plex_service,
             grant_service=grant_service
         )
+        sys.exit(0)
+
+    if args.show_invoices:
+        threshold = args.threshold if args.threshold is not None else config.OVERDUE_DAYS_THRESHOLD
+        handle_show_invoices(zoho_service=zoho_service, threshold=threshold)
         sys.exit(0)
 
     # Standard Daily Sync Execution
