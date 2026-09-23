@@ -12,38 +12,88 @@ class ZohoBooksService:
     def refresh_access_token(self) -> str:
         """Refreshes the OAuth 2.0 access token using the refresh token."""
         url = f"{self.cfg.ZOHO_ACCOUNTS_URL}/oauth/v2/token"
+        
+        # Sanitize credentials (strip whitespace, single & double quotes)
+        clean_refresh_token = self.cfg.ZOHO_REFRESH_TOKEN.strip().strip("'\"")
+        clean_client_id = self.cfg.ZOHO_CLIENT_ID.strip().strip("'\"")
+        clean_client_secret = self.cfg.ZOHO_CLIENT_SECRET.strip().strip("'\"")
+
         params = {
-            "refresh_token": self.cfg.ZOHO_REFRESH_TOKEN.strip(),
-            "client_id": self.cfg.ZOHO_CLIENT_ID.strip(),
-            "client_secret": self.cfg.ZOHO_CLIENT_SECRET.strip(),
+            "refresh_token": clean_refresh_token,
+            "client_id": clean_client_id,
+            "client_secret": clean_client_secret,
             "grant_type": "refresh_token"
         }
         
-        logger.info(f"Refreshing Zoho Books access token ({self.cfg.ZOHO_ACCOUNTS_URL})...")
-        response = requests.post(url, params=params, timeout=30)
-        response.raise_for_status()
-        data = response.json()
+        logger.info(f"Refreshing Zoho Books access token via {url}...")
+        
+        # Standard RFC 6749 form-urlencoded POST
+        response = requests.post(url, data=params, timeout=30)
+        data = response.json() if response.content else {}
+
+        # Fallback to query params if data payload returns error
+        if "access_token" not in data:
+            logger.info("Attempting fallback OAuth refresh with URL query parameters...")
+            response = requests.post(url, params=params, timeout=30)
+            data = response.json() if response.content else {}
         
         if "access_token" not in data:
             error_code = data.get("error", "unknown_error")
-            if error_code == "invalid_code":
+            working_domain = self.test_all_domains()
+
+            if working_domain and working_domain != self.cfg.ZOHO_DOMAIN:
                 msg = (
-                    "Zoho error 'invalid_code': The ZOHO_REFRESH_TOKEN in your .env is invalid or expired. "
-                    "Make sure you exchanged your 10-minute Grant Code via curl to get the actual refresh_token, "
-                    "and check if ZOHO_DOMAIN matches your region (e.g. 'com', 'eu', 'in')."
+                    f"SUCCESS: Found working Zoho domain '{working_domain}'! "
+                    f"Your .env currently has ZOHO_DOMAIN={self.cfg.ZOHO_DOMAIN}. "
+                    f"Please update your .env to: ZOHO_DOMAIN={working_domain}"
+                )
+            elif error_code == "invalid_code":
+                msg = (
+                    f"Zoho error 'invalid_code' from {url}.\n"
+                    "Possible causes:\n"
+                    " 1. The ZOHO_REFRESH_TOKEN in .env is invalid or contains a 10-min Grant Code instead of a Refresh Token.\n"
+                    " 2. ZOHO_CLIENT_ID / ZOHO_CLIENT_SECRET does not match the app that generated the token.\n"
+                    " 3. Make sure to generate the Grant Code in the Zoho API Console for the correct region."
                 )
             elif error_code == "invalid_client":
-                msg = (
-                    "Zoho error 'invalid_client': ZOHO_CLIENT_ID or ZOHO_CLIENT_SECRET in .env is incorrect."
-                )
+                msg = f"Zoho error 'invalid_client': ZOHO_CLIENT_ID or ZOHO_CLIENT_SECRET in .env is incorrect."
             else:
-                msg = f"Failed to refresh Zoho access token: {error_code}"
+                msg = f"Failed to refresh Zoho access token: {error_code} ({data})"
             
             logger.error(msg)
             raise ValueError(msg)
         
         self._access_token = data["access_token"]
         return self._access_token
+
+    def test_all_domains(self) -> Optional[str]:
+        """
+        Tests token refresh across all known Zoho domains (.com, .eu, .in, .com.au, .ca)
+        to identify if the issue is a regional domain mismatch.
+        Returns the working domain string if found, or None.
+        """
+        domains = ["com", "eu", "in", "com.au", "ca", "zohocloud.ca"]
+        clean_refresh_token = self.cfg.ZOHO_REFRESH_TOKEN.strip().strip("'\"")
+        clean_client_id = self.cfg.ZOHO_CLIENT_ID.strip().strip("'\"")
+        clean_client_secret = self.cfg.ZOHO_CLIENT_SECRET.strip().strip("'\"")
+
+        params = {
+            "refresh_token": clean_refresh_token,
+            "client_id": clean_client_id,
+            "client_secret": clean_client_secret,
+            "grant_type": "refresh_token"
+        }
+
+        for dom in domains:
+            url = f"https://accounts.zoho.{dom}/oauth/v2/token"
+            try:
+                resp = requests.post(url, data=params, timeout=10)
+                data = resp.json() if resp.content else {}
+                if "access_token" in data:
+                    return dom
+            except Exception:
+                pass
+        return None
 
     def get_headers(self) -> Dict[str, str]:
         if not self._access_token:
