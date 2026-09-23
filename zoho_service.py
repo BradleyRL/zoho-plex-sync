@@ -312,14 +312,39 @@ class ZohoBooksService:
 
         return None
 
+    def fetch_all_contact_emails(self, customer_id: str) -> list[str]:
+        """
+        Fetches primary and all secondary/additional contact person emails for a customer from Zoho Books.
+        """
+        url = f"{self.cfg.ZOHO_BOOKS_API_URL}/contacts/{customer_id}"
+        params = {"organization_id": self.cfg.ZOHO_ORGANIZATION_ID}
+        emails = []
+        try:
+            resp = requests.get(url, headers=self.get_headers(), params=params, timeout=30)
+            if resp.status_code == 200:
+                contact = resp.json().get("contact", {})
+                primary = contact.get("email")
+                if primary:
+                    emails.append(primary.strip().lower())
+                
+                for cp in contact.get("contact_persons", []):
+                    cp_email = cp.get("email")
+                    if cp_email:
+                        emails.append(cp_email.strip().lower())
+        except Exception as e:
+            logger.warning(f"Could not fetch contact person details for customer {customer_id}: {e}")
+        return emails
+
     def get_active_recurring_invoice_emails(self) -> set[str]:
         """
-        Fetches all customer emails from Zoho Books that currently have an ACTIVE recurring invoice.
-        Handles pagination.
+        Fetches all customer emails (including primary and secondary contact persons)
+        from Zoho Books that currently have an ACTIVE recurring invoice.
+        Handles pagination and caches customer lookups.
         """
         url = f"{self.cfg.ZOHO_BOOKS_API_URL}/recurringinvoices"
         page = 1
         active_emails: set[str] = set()
+        visited_customer_ids: set[str] = set()
 
         while True:
             params = {
@@ -341,12 +366,15 @@ class ZohoBooksService:
                 rec_list = data.get("recurring_invoices", [])
                 for rec in rec_list:
                     email = rec.get("email") or rec.get("customer_email")
-                    customer_id = rec.get("customer_id")
-                    if not email and customer_id:
-                        email = self.fetch_contact_email(customer_id)
-                    
                     if email:
                         active_emails.add(email.strip().lower())
+
+                    customer_id = rec.get("customer_id")
+                    if customer_id and customer_id not in visited_customer_ids:
+                        visited_customer_ids.add(customer_id)
+                        # Fetch primary + all secondary contact person emails for this customer
+                        contact_emails = self.fetch_all_contact_emails(customer_id)
+                        active_emails.update(contact_emails)
 
                 page_context = data.get("page_context", {})
                 if not page_context.get("has_more_page", False):

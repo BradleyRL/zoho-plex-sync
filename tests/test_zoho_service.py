@@ -66,13 +66,19 @@ def test_get_active_recurring_invoice_emails():
     mock_resp.json.return_value = {
         "code": 0,
         "recurring_invoices": [
-            {"email": "active1@example.com", "status": "active"},
-            {"email": "ACTIVE2@EXAMPLE.COM ", "status": "active"}
+            {"email": "active1@example.com", "customer_id": "C101", "status": "active"},
+            {"email": "ACTIVE2@EXAMPLE.COM ", "customer_id": "C102", "status": "active"}
         ],
         "page_context": {"has_more_page": False}
     }
 
+    def mock_contact_emails(customer_id):
+        if customer_id == "C101":
+            return ["active1@example.com", "secondary_c101@example.com"]
+        return ["active2@example.com"]
+
     with patch("requests.get", return_value=mock_resp):
         with patch.object(service, "get_headers", return_value={}):
-            emails = service.get_active_recurring_invoice_emails()
-            assert emails == {"active1@example.com", "active2@example.com"}
+            with patch.object(service, "fetch_all_contact_emails", side_effect=mock_contact_emails):
+                emails = service.get_active_recurring_invoice_emails()
+                assert emails == {"active1@example.com", "active2@example.com", "secondary_c101@example.com"}
