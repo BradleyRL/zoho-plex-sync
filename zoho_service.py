@@ -13,20 +13,34 @@ class ZohoBooksService:
         """Refreshes the OAuth 2.0 access token using the refresh token."""
         url = f"{self.cfg.ZOHO_ACCOUNTS_URL}/oauth/v2/token"
         params = {
-            "refresh_token": self.cfg.ZOHO_REFRESH_TOKEN,
-            "client_id": self.cfg.ZOHO_CLIENT_ID,
-            "client_secret": self.cfg.ZOHO_CLIENT_SECRET,
+            "refresh_token": self.cfg.ZOHO_REFRESH_TOKEN.strip(),
+            "client_id": self.cfg.ZOHO_CLIENT_ID.strip(),
+            "client_secret": self.cfg.ZOHO_CLIENT_SECRET.strip(),
             "grant_type": "refresh_token"
         }
         
-        logger.info("Refreshing Zoho Books access token...")
-        response = requests.post(url, data=params, timeout=30)
+        logger.info(f"Refreshing Zoho Books access token ({self.cfg.ZOHO_ACCOUNTS_URL})...")
+        response = requests.post(url, params=params, timeout=30)
         response.raise_for_status()
         data = response.json()
         
         if "access_token" not in data:
-            error_msg = data.get("error", "Unknown error refreshing token")
-            raise ValueError(f"Failed to refresh Zoho access token: {error_msg}")
+            error_code = data.get("error", "unknown_error")
+            if error_code == "invalid_code":
+                msg = (
+                    "Zoho error 'invalid_code': The ZOHO_REFRESH_TOKEN in your .env is invalid or expired. "
+                    "Make sure you exchanged your 10-minute Grant Code via curl to get the actual refresh_token, "
+                    "and check if ZOHO_DOMAIN matches your region (e.g. 'com', 'eu', 'in')."
+                )
+            elif error_code == "invalid_client":
+                msg = (
+                    "Zoho error 'invalid_client': ZOHO_CLIENT_ID or ZOHO_CLIENT_SECRET in .env is incorrect."
+                )
+            else:
+                msg = f"Failed to refresh Zoho access token: {error_code}"
+            
+            logger.error(msg)
+            raise ValueError(msg)
         
         self._access_token = data["access_token"]
         return self._access_token
