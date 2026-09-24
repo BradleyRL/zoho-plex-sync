@@ -10,8 +10,10 @@ def test_temporary_pass_lifecycle(tmp_path):
     now = datetime(2026, 9, 23, 10, 0, 0)
     
     # 1. Add 2-day temporary pass
-    pass_info = service.add_temporary_pass("tempuser@example.com", days=2, reference_time=now)
+    pass_info = service.add_temporary_pass("tempuser@example.com", customer_name="Temp User", customer_id="CUST123", days=2, reference_time=now)
     assert pass_info["days"] == 2
+    assert pass_info["customer_name"] == "Temp User"
+    assert pass_info["customer_id"] == "CUST123"
 
     # 2. Active at 1 day after
     day1 = now + timedelta(days=1)
@@ -23,7 +25,13 @@ def test_temporary_pass_lifecycle(tmp_path):
 
     # 4. Get expired passes triggers revocation list & auto cleanup
     expired_list = service.get_expired_temporary_passes(reference_time=expired_time)
-    assert expired_list == ["tempuser@example.com"]
+    assert expired_list == [
+        {
+            "email": "tempuser@example.com",
+            "customer_name": "Temp User",
+            "customer_id": "CUST123"
+        }
+    ]
 
     # 5. Second check after cleanup returns empty list
     expired_list_2 = service.get_expired_temporary_passes(reference_time=expired_time)

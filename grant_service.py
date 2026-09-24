@@ -37,7 +37,14 @@ class GrantService:
         except Exception as e:
             logger.error(f"Failed to write grants data file {self.file_path}: {e}")
 
-    def add_temporary_pass(self, email: str, days: int = 2, reference_time: Optional[datetime] = None) -> Dict[str, Any]:
+    def add_temporary_pass(
+        self,
+        email: str,
+        customer_name: str = "",
+        customer_id: str = "",
+        days: int = 2,
+        reference_time: Optional[datetime] = None
+    ) -> Dict[str, Any]:
         """Adds a temporary pass valid for `days` days (default: 2 days, or 3 days if granted on Friday)."""
         email_clean = email.strip().lower()
         now = reference_time if reference_time is not None else datetime.now()
@@ -57,7 +64,9 @@ class GrantService:
         pass_info = {
             "granted_at": now.isoformat(),
             "expires_at": expires_at.isoformat(),
-            "days": days
+            "days": days,
+            "customer_name": customer_name,
+            "customer_id": customer_id
         }
         data["temporary_passes"][email_clean] = pass_info
         self._save_data(data)
@@ -114,28 +123,32 @@ class GrantService:
         expires_at = datetime.fromisoformat(temp_info["expires_at"])
         return reference_time < expires_at
 
-    def get_expired_temporary_passes(self, reference_time: Optional[datetime] = None) -> List[str]:
+    def get_expired_temporary_passes(self, reference_time: Optional[datetime] = None) -> List[Dict[str, str]]:
         """
-        Returns a list of emails whose temporary passes have expired.
+        Returns a list of dicts with email, customer_name, and customer_id of expired temporary passes.
         Cleans up the expired passes from storage.
         """
         if reference_time is None:
             reference_time = datetime.now()
 
         data = self._load_data()
-        expired_emails = []
+        expired_passes = []
         temp_passes = data.get("temporary_passes", {})
         remaining_passes = {}
 
         for email, pass_info in temp_passes.items():
             expires_at = datetime.fromisoformat(pass_info["expires_at"])
             if reference_time >= expires_at:
-                expired_emails.append(email)
+                expired_passes.append({
+                    "email": email,
+                    "customer_name": pass_info.get("customer_name", ""),
+                    "customer_id": pass_info.get("customer_id", "")
+                })
             else:
                 remaining_passes[email] = pass_info
 
-        if expired_emails:
+        if expired_passes:
             data["temporary_passes"] = remaining_passes
             self._save_data(data)
 
-        return expired_emails
+        return expired_passes

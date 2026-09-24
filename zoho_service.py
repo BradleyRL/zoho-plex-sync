@@ -180,7 +180,6 @@ class ZohoBooksService:
     ) -> List[Dict[str, Any]]:
         """
         Processes overdue invoices and aggregates users with invoices overdue by more than `days_threshold`.
-        Includes primary and all secondary/additional contact person emails for each customer.
         Returns a list of dicts:
         [
             {
@@ -391,3 +390,92 @@ class ZohoBooksService:
                 break
 
         return active_emails
+
+    def create_customer(self, contact_name: str, email: str, currency_code: str = "GTQ") -> str:
+        """
+        Creates a new customer contact in Zoho Books (or returns existing customer_id if email exists).
+        Default currency_code is 'GTQ'.
+        """
+        clean_email = email.strip().lower()
+        clean_name = contact_name.strip()
+
+        # First check if customer already exists by searching email
+        url_search = f"{self.cfg.ZOHO_BOOKS_API_URL}/contacts"
+        params_search = {
+            "organization_id": self.cfg.ZOHO_ORGANIZATION_ID,
+            "email": clean_email
+        }
+        try:
+            resp_search = requests.get(url_search, headers=self.get_headers(), params=params_search, timeout=30)
+            if resp_search.status_code == 200:
+                contacts = resp_search.json().get("contacts", [])
+                if contacts:
+                    cid = contacts[0].get("contact_id")
+                    logger.info(f"Found existing customer in Zoho Books for '{clean_email}': ID {cid}")
+                    return str(cid)
+        except Exception as e:
+            logger.warning(f"Error searching existing contact by email: {e}")
+
+        # Create new customer in Zoho Books
+        logger.info(f"Creating new customer in Zoho Books: '{clean_name}' ({clean_email})...")
+        payload = {
+            "contact_name": clean_name,
+            "email": clean_email,
+            "currency_code": currency_code
+        }
+        resp = requests.post(url_search, headers=self.get_headers(), params={"organization_id": self.cfg.ZOHO_ORGANIZATION_ID}, json=payload, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+
+        if data.get("code") != 0:
+            raise RuntimeError(f"Zoho API error creating customer: {data.get('message')}")
+
+        contact_id = data.get("contact", {}).get("contact_id")
+        logger.info(f"Successfully created customer '{clean_name}' in Zoho Books. ID: {contact_id}")
+        return str(contact_id)
+
+    def create_recurring_invoice(
+        self,
+        customer_id: str,
+        recurrence_name: str,
+        start_date: str,
+        item_id: str = "5251269000000090022",
+        quantity: int = 1,
+        never_expires: bool = True,
+        payment_terms: int = 0
+    ) -> Dict[str, Any]:
+        """
+        Creates a new Recurring Invoice in Zoho Books upon temporary pass expiration.
+        """
+        url = f"{self.cfg.ZOHO_BOOKS_API_URL}/recurringinvoices"
+        params = {"organization_id": self.cfg.ZOHO_ORGANIZATION_ID}
+        
+        payload = {
+            "customer_id": customer_id,
+            "recurrence_name": recurrence_name,
+            "recurrence_frequency": "months",
+            "repeat_every": 1,
+            "start_date": start_date,
+            "never_expires": never_expires,
+            "payment_terms": payment_terms,
+            "line_items": [
+                {
+                    "item_id": item_id,
+                    "quantity": quantity
+                }
+            ]
+        }
+
+        logger.info(f"Creating Recurring Invoice in Zoho Books for customer ID '{customer_id}' ({recurrence_name})...")
+        resp = requests.post(url, headers=self.get_headers(), params=params, json=payload, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+
+        if data.get("code") != 0:
+            raise RuntimeError(f"Zoho API error creating recurring invoice: {data.get('message')}")
+
+        rec_invoice = data.get("recurring_invoice", {})
+        rec_id = rec_invoice.get("recurring_invoice_id")
+        rec_num = rec_invoice.get("recurring_invoice_number", rec_id)
+        logger.info(f"Successfully created Recurring Invoice #{rec_num} for customer '{recurrence_name}'.")
+        return rec_invoice

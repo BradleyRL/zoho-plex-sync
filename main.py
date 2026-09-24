@@ -4,13 +4,14 @@ Zoho Books Overdue Invoices to Plex Access Sync & Access Management Script.
 
 This script manages Plex library access based on Zoho Books overdue invoices (> 3 days),
 and supports CLI options for:
- 1. Granting 2-day temporary access by email (--grant-temp email)
+ 1. Granting 2-day temporary access by email (--grant-temp email --name customer_name)
  2. Granting access by Zoho Recurring Invoice # (--grant-invoice #)
  3. Granting permanent access by email (--grant-permanent email)
 """
 
 import sys
 import argparse
+from datetime import datetime
 from config import config
 from logger_service import logger, log_disabled_user
 from zoho_service import ZohoBooksService
@@ -28,6 +29,12 @@ def parse_args():
         type=str,
         metavar="EMAIL",
         help="Opción 1: Grant temporary access to EMAIL (valid for N days, default 2 days)."
+    )
+    parser.add_argument(
+        "--name",
+        type=str,
+        metavar="CUSTOMER_NAME",
+        help="Customer name required when granting temporary access (--grant-temp)."
     )
     parser.add_argument(
         "--days",
@@ -77,22 +84,50 @@ def parse_args():
     )
     return parser.parse_args()
 
-def handle_grant_temp(email: str, days: int, plex_service: PlexService, grant_service: GrantService, dry_run: bool):
-    """Opción 1: Grant temporary access valid for N days."""
+def handle_grant_temp(
+    email: str,
+    customer_name: str,
+    days: int,
+    zoho_service: ZohoBooksService,
+    plex_service: PlexService,
+    grant_service: GrantService,
+    dry_run: bool
+):
+    """Opción 1: Grant temporary access valid for N days, creating customer in Zoho Books."""
+    if not customer_name:
+        logger.error("Error: --name [CUSTOMER_NAME] is required when using --grant-temp.")
+        sys.exit(1)
+
+    logger.info(f"[OPTION 1] Creating/fetching customer '{customer_name}' in Zoho Books (currency GTQ)...")
+    if dry_run:
+        logger.info(f"[DRY-RUN] Would create customer '{customer_name}' ({email}) in Zoho Books with currency GTQ.")
+        customer_id = "DRY_RUN_CUSTOMER_ID"
+    else:
+        try:
+            customer_id = zoho_service.create_customer(contact_name=customer_name, email=email, currency_code="GTQ")
+        except Exception as e:
+            logger.error(f"Failed to create customer in Zoho Books: {e}")
+            sys.exit(1)
+
     logger.info(f"[OPTION 1] Granting temporary access for '{email}' ({days} days)...")
-    pass_info = grant_service.add_temporary_pass(email=email, days=days)
+    pass_info = grant_service.add_temporary_pass(
+        email=email,
+        customer_name=customer_name,
+        customer_id=customer_id,
+        days=days
+    )
     result = plex_service.grant_user_access(email=email, dry_run=dry_run)
     
     log_disabled_user(
         email=email,
-        customer_name="Temporary Pass",
+        customer_name=customer_name,
         invoice_numbers=["TEMP-PASS"],
         max_days_overdue=0,
         action=f"Granted temporary access ({days} days, expires {pass_info['expires_at']})",
         status=result["status"],
         dry_run=dry_run
     )
-    logger.info(f"Temporary pass granted successfully for '{email}'. Result: {result['status']}")
+    logger.info(f"Temporary pass granted successfully for '{email}' (Zoho Customer ID: {customer_id}). Result: {result['status']}")
 
 def handle_grant_invoice(invoice_num: str, zoho_service: ZohoBooksService, plex_service: PlexService, grant_service: GrantService, dry_run: bool):
     """Opción 2: Grant access by entering Zoho Recurring Invoice #."""
@@ -264,7 +299,9 @@ def main():
     if args.grant_temp:
         handle_grant_temp(
             email=args.grant_temp,
+            customer_name=args.name,
             days=args.days,
+            zoho_service=zoho_service,
             plex_service=plex_service,
             grant_service=grant_service,
             dry_run=args.dry_run
@@ -311,18 +348,45 @@ def main():
     logger.info(f"Execution Mode: {'[DRY-RUN]' if args.dry_run else '[LIVE]'}")
     logger.info("==================================================")
 
-    # STEP 1: Process and revoke expired 2-day temporary passes (WITHOUT checking Zoho)
-    expired_temp_emails = grant_service.get_expired_temporary_passes()
-    if expired_temp_emails:
-        logger.info(f"Found {len(expired_temp_emails)} expired temporary pass(es). Revoking access directly...")
-        for expired_email in expired_temp_emails:
+    # STEP 1: Process and revoke expired 2-day temporary passes & create Recurring Invoices in Zoho
+    expired_temp_passes = grant_service.get_expired_temporary_passes()
+    if expired_temp_passes:
+        logger.info(f"Found {len(expired_temp_passes)} expired temporary pass(es). Processing...")
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        for pass_info in expired_temp_passes:
+            expired_email = pass_info["email"]
+            customer_name = pass_info.get("customer_name") or expired_email
+            customer_id = pass_info.get("customer_id")
+
+            # Create recurring invoice in Zoho Books if customer_id exists
+            if customer_id:
+                if args.dry_run:
+                    logger.info(f"[DRY-RUN] Would create Recurring Invoice in Zoho Books for '{customer_name}' (ID: {customer_id}).")
+                else:
+                    try:
+                        zoho_service.create_recurring_invoice(
+                            customer_id=customer_id,
+                            recurrence_name=customer_name,
+                            start_date=today_str,
+                            item_id="5251269000000090022",
+                            quantity=1,
+                            never_expires=True,
+                            payment_terms=0
+                        )
+                        logger.info(f"Created Recurring Invoice in Zoho Books for '{customer_name}'.")
+                    except Exception as e:
+                        logger.error(f"Failed to create Recurring Invoice for '{customer_name}': {e}")
+            else:
+                logger.warning(f"No customer_id saved for expired pass '{expired_email}'. Skipping Recurring Invoice creation.")
+
+            # Revoke access on Plex directly
             revoke_res = plex_service.revoke_user_access(email=expired_email, dry_run=args.dry_run)
             log_disabled_user(
                 email=expired_email,
-                customer_name="Temporary Pass (Expired)",
+                customer_name=f"{customer_name} (Expired Pass)",
                 invoice_numbers=["EXPIRED-PASS"],
                 max_days_overdue=0,
-                action="Access revoked automatically: 2-day temporary pass expired",
+                action="Access revoked & recurring invoice created: temporary pass expired",
                 status=revoke_res["status"],
                 dry_run=args.dry_run
             )
