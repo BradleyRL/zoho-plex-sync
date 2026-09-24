@@ -9,24 +9,11 @@ def send_discord_sync_summary(
 ) -> bool:
     """
     Sends a rich Embed summary of the daily Zoho Books -> Plex sync execution
-    to a designated Discord channel via Discord's REST API.
+    to a designated Discord channel via Discord Webhook or Bot REST API.
     """
+    webhook_url = config.DISCORD_WEBHOOK_URL.strip()
     bot_token = config.DISCORD_BOT_TOKEN.strip()
     target_channel_id = (channel_id or config.DISCORD_NOTIFICATION_CHANNEL_ID).strip()
-
-    if not bot_token:
-        logger.debug("DISCORD_BOT_TOKEN is not configured. Skipping Discord channel notification.")
-        return False
-
-    if not target_channel_id:
-        logger.debug("DISCORD_NOTIFICATION_CHANNEL_ID is not configured. Skipping Discord channel notification.")
-        return False
-
-    url = f"https://discord.com/api/v10/channels/{target_channel_id}/messages"
-    headers = {
-        "Authorization": f"Bot {bot_token}",
-        "Content-Type": "application/json"
-    }
 
     dry_run = summary_data.get("dry_run", False)
     threshold = summary_data.get("threshold", config.OVERDUE_DAYS_THRESHOLD)
@@ -69,14 +56,36 @@ def send_discord_sync_summary(
 
     payload = {"embeds": [embed]}
 
-    try:
-        resp = requests.post(url, headers=headers, json=payload, timeout=15)
-        if resp.status_code in (200, 201):
-            logger.info(f"Reporte de sincronización diario enviado exitosamente al canal de Discord {target_channel_id}.")
-            return True
-        else:
-            logger.warning(f"No se pudo enviar la notificación a Discord. HTTP {resp.status_code}: {resp.text}")
+    # Method 1: Send via Webhook URL if configured
+    if webhook_url:
+        try:
+            resp = requests.post(webhook_url, json=payload, timeout=15)
+            if resp.status_code in (200, 204):
+                logger.info("Reporte de sincronización diario enviado exitosamente vía Webhook a Discord.")
+                return True
+            else:
+                logger.warning(f"No se pudo enviar la notificación vía Webhook. HTTP {resp.status_code}: {resp.text}")
+        except Exception as e:
+            logger.error(f"Error enviando reporte vía Webhook a Discord: {e}")
+
+    # Method 2: Send via Bot REST API
+    if bot_token and target_channel_id:
+        url = f"https://discord.com/api/v10/channels/{target_channel_id}/messages"
+        headers = {
+            "Authorization": f"Bot {bot_token}",
+            "Content-Type": "application/json"
+        }
+        try:
+            resp = requests.post(url, headers=headers, json=payload, timeout=15)
+            if resp.status_code in (200, 201):
+                logger.info(f"Reporte de sincronización diario enviado exitosamente al canal de Discord {target_channel_id}.")
+                return True
+            else:
+                logger.warning(f"No se pudo enviar la notificación a Discord. HTTP {resp.status_code}: {resp.text}")
+                return False
+        except Exception as e:
+            logger.error(f"Error enviando reporte de sincronización a Discord: {e}")
             return False
-    except Exception as e:
-        logger.error(f"Error enviando reporte de sincronización a Discord: {e}")
-        return False
+
+    logger.debug("Ni Webhook URL ni Bot Token/Channel ID válidos están configurados.")
+    return False
