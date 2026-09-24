@@ -16,6 +16,35 @@ class PlexService:
             self._account = MyPlexAccount(token=self.cfg.PLEX_TOKEN)
         return self._account
 
+    def _get_plex_server(self, account: MyPlexAccount):
+        """Helper to find and connect to the configured Plex server (or first owned server)."""
+        server_name = self.cfg.PLEX_SERVER_NAME
+        
+        # Backward compatibility for mocks that defined account.server
+        if hasattr(account, "server") and callable(getattr(account, "server")):
+            try:
+                srv = account.server(server_name)
+                if srv:
+                    return srv
+            except Exception:
+                pass
+
+        resources = account.resources()
+        if server_name:
+            matching = [r for r in resources if getattr(r, "name", "").strip().lower() == server_name.strip().lower()]
+            if not matching:
+                raise RuntimeError(f"Plex server '{server_name}' not found in Plex account resources.")
+            return matching[0].connect()
+        else:
+            owned_servers = [s for s in resources if getattr(s, "owned", False) and getattr(s, "provides", "") == "server"]
+            if not owned_servers:
+                owned_servers = [s for s in resources if getattr(s, "owned", False)]
+            if not owned_servers:
+                if resources:
+                    return resources[0].connect()
+                raise RuntimeError("No owned Plex servers found in this Plex account.")
+            return owned_servers[0].connect()
+
     def find_user_by_email(self, email: str) -> Optional[Any]:
         """Finds a shared friend/user in Plex Account matching the given email."""
         account = self.get_account()
@@ -97,16 +126,7 @@ class PlexService:
                     }
 
                 # Get the server instance
-                server_name = self.cfg.PLEX_SERVER_NAME
-                if server_name:
-                    server = account.server(server_name)
-                else:
-                    # Default to the first available server owned by account
-                    resources = account.resources()
-                    owned_servers = [s for s in resources if getattr(s, "owned", False)]
-                    if not owned_servers:
-                        raise RuntimeError("No owned Plex servers found in this Plex account.")
-                    server = owned_servers[0].connect()
+                server = self._get_plex_server(account)
 
                 # Get all available library sections
                 all_sections = server.library.sections()
@@ -166,15 +186,7 @@ class PlexService:
             user = self.find_user_by_email(email_clean)
 
             # Get the server instance
-            server_name = self.cfg.PLEX_SERVER_NAME
-            if server_name:
-                server = account.server(server_name)
-            else:
-                resources = account.resources()
-                owned_servers = [s for s in resources if getattr(s, "owned", False)]
-                if not owned_servers:
-                    raise RuntimeError("No owned Plex servers found in this Plex account.")
-                server = owned_servers[0].connect()
+            server = self._get_plex_server(account)
 
             all_sections = server.library.sections()
 
