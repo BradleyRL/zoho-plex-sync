@@ -369,6 +369,9 @@ class ZohoBooksService:
                     break
 
                 rec_list = data.get("recurring_invoices", [])
+                if not rec_list:
+                    break
+
                 for rec in rec_list:
                     email = rec.get("email") or rec.get("customer_email")
                     if email:
@@ -382,6 +385,8 @@ class ZohoBooksService:
                         active_emails.update(contact_emails)
 
                 page_context = data.get("page_context", {})
+                if not page_context.get("has_more_page", False):
+                    break
                 page += 1
             except Exception as e:
                 logger.error(f"Failed to fetch active recurring invoices from Zoho Books: {e}")
