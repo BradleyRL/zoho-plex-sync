@@ -335,13 +335,10 @@ def main():
         logger.error(f"Failed to fetch overdue users from Zoho Books: {e}")
         sys.exit(1)
 
-    # Filter out users with an active permanent pass or active temporary pass
+    # Filter out users with an active temporary pass (active grace period)
     filtered_users_to_disable = []
     for user_info in users_to_disable:
         email = user_info["email"]
-        if grant_service.is_permanently_allowed(email):
-            logger.info(f"Skipping overdue enforcement for '{email}': User has a PERMANENT pass.")
-            continue
         if grant_service.is_temporary_active(email):
             logger.info(f"Skipping overdue enforcement for '{email}': User has an ACTIVE temporary pass.")
             continue
