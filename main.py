@@ -17,6 +17,7 @@ from logger_service import logger, log_disabled_user
 from zoho_service import ZohoBooksService
 from plex_service import PlexService
 from grant_service import GrantService
+from discord_notifier import send_discord_sync_summary
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -350,6 +351,7 @@ def main():
 
     # STEP 1: Process and revoke expired 2-day temporary passes & create Recurring Invoices in Zoho
     expired_temp_passes = grant_service.get_expired_temporary_passes()
+    expired_processed = []
     if expired_temp_passes:
         logger.info(f"Found {len(expired_temp_passes)} expired temporary pass(es). Processing...")
         today_str = datetime.now().strftime("%Y-%m-%d")
@@ -358,10 +360,10 @@ def main():
             customer_name = pass_info.get("customer_name") or expired_email
             customer_id = pass_info.get("customer_id")
 
-            # Create recurring invoice in Zoho Books if customer_id exists
+            rec_inv_status = "N/A"
             if customer_id:
                 if args.dry_run:
-                    logger.info(f"[DRY-RUN] Would create Recurring Invoice in Zoho Books for '{customer_name}' (ID: {customer_id}).")
+                    rec_inv_status = "[DRY-RUN] Se crearía factura recurrente"
                 else:
                     try:
                         zoho_service.create_recurring_invoice(
@@ -373,8 +375,10 @@ def main():
                             never_expires=True,
                             payment_terms=0
                         )
+                        rec_inv_status = "Creada exitosamente"
                         logger.info(f"Created Recurring Invoice in Zoho Books for '{customer_name}'.")
                     except Exception as e:
+                        rec_inv_status = f"Error: {e}"
                         logger.error(f"Failed to create Recurring Invoice for '{customer_name}': {e}")
             else:
                 logger.warning(f"No customer_id saved for expired pass '{expired_email}'. Skipping Recurring Invoice creation.")
@@ -391,6 +395,12 @@ def main():
                 dry_run=args.dry_run
             )
             logger.info(f"Revoked access for expired temporary pass '{expired_email}'. Status: {revoke_res['status']}")
+            expired_processed.append({
+                "email": expired_email,
+                "customer": customer_name,
+                "status": revoke_res["status"],
+                "rec_invoice": rec_inv_status
+            })
 
     # STEP 2: Process Zoho Books Overdue Invoices
     try:
@@ -408,43 +418,41 @@ def main():
             continue
         filtered_users_to_disable.append(user_info)
 
-    if not filtered_users_to_disable:
-        logger.info("No overdue users requiring access revocation today. Sync complete.")
-        sys.exit(0)
-
-    logger.info(f"Found {len(filtered_users_to_disable)} user(s) with overdue invoices > {threshold} days to process.")
-
     success_count = 0
     already_disabled_count = 0
     not_found_count = 0
     failed_count = 0
 
-    for user_info in filtered_users_to_disable:
-        email = user_info["email"]
-        customer_name = user_info["customer_name"]
-        invoice_numbers = user_info["invoice_numbers"]
-        max_days = user_info["max_days_overdue"]
+    if filtered_users_to_disable:
+        logger.info(f"Found {len(filtered_users_to_disable)} user(s) with overdue invoices > {threshold} days to process.")
+        for user_info in filtered_users_to_disable:
+            email = user_info["email"]
+            customer_name = user_info["customer_name"]
+            invoice_numbers = user_info["invoice_numbers"]
+            max_days = user_info["max_days_overdue"]
 
-        result = plex_service.revoke_user_access(email=email, dry_run=args.dry_run)
+            result = plex_service.revoke_user_access(email=email, dry_run=args.dry_run)
 
-        log_disabled_user(
-            email=email,
-            customer_name=customer_name,
-            invoice_numbers=invoice_numbers,
-            max_days_overdue=max_days,
-            action=result["action"],
-            status=result["status"],
-            dry_run=args.dry_run
-        )
+            log_disabled_user(
+                email=email,
+                customer_name=customer_name,
+                invoice_numbers=invoice_numbers,
+                max_days_overdue=max_days,
+                action=result["action"],
+                status=result["status"],
+                dry_run=args.dry_run
+            )
 
-        if result["status"] in ("SUCCESS", "DRY_RUN"):
-            success_count += 1
-        elif result["status"] == "ALREADY_DISABLED":
-            already_disabled_count += 1
-        elif result["status"] == "NOT_FOUND":
-            not_found_count += 1
-        else:
-            failed_count += 1
+            if result["status"] in ("SUCCESS", "DRY_RUN"):
+                success_count += 1
+            elif result["status"] == "ALREADY_DISABLED":
+                already_disabled_count += 1
+            elif result["status"] == "NOT_FOUND":
+                not_found_count += 1
+            else:
+                failed_count += 1
+    else:
+        logger.info("No overdue users requiring access revocation today. Sync complete.")
 
     logger.info("--------------------------------------------------")
     logger.info(
@@ -453,6 +461,20 @@ def main():
         f"Plex Not Found: {not_found_count} | Failed: {failed_count}"
     )
     logger.info("==================================================")
+
+    # Send summary Embed report to Discord Channel (Cron / CLI execution notification)
+    send_discord_sync_summary({
+        "dry_run": args.dry_run,
+        "threshold": threshold,
+        "expired_processed": expired_processed,
+        "summary": {
+            "total": len(filtered_users_to_disable),
+            "success": success_count,
+            "already_disabled": already_disabled_count,
+            "not_found": not_found_count,
+            "failed": failed_count
+        }
+    })
 
 if __name__ == "__main__":
     main()

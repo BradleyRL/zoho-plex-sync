@@ -40,6 +40,7 @@ class Config:
     DISCORD_BOT_TOKEN: str = os.getenv("DISCORD_BOT_TOKEN", "")
     _DISCORD_ALLOWED_USERS_RAW: str = os.getenv("DISCORD_ALLOWED_USERS", "")
     DISCORD_GUILD_ID: str = os.getenv("DISCORD_GUILD_ID", "")
+    DISCORD_NOTIFICATION_CHANNEL_ID: str = os.getenv("DISCORD_NOTIFICATION_CHANNEL_ID", "1552699204772696267")
 
     @property
     def DISCORD_ALLOWED_USERS(self) -> list[int]:
