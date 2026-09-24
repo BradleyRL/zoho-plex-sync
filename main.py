@@ -7,6 +7,7 @@ and supports CLI options for:
  1. Granting 2-day temporary access by email (--grant-temp email)
  2. Granting access by Zoho Recurring Invoice # (--grant-invoice #)
  3. Granting permanent access by email (--grant-permanent email)
+ 4. Revoking access directly by email (--revoke-access email)
 """
 
 import sys
@@ -64,6 +65,12 @@ def parse_args():
         "--show-invoices",
         action="store_true",
         help="Debug: Fetch and display all unpaid/overdue invoices from Zoho Books."
+    )
+    parser.add_argument(
+        "--revoke-access",
+        type=str,
+        metavar="EMAIL",
+        help="Opción 5: Revoke Plex library access for EMAIL immediately."
     )
 
     # General options
@@ -272,6 +279,23 @@ def handle_show_invoices(zoho_service: ZohoBooksService, threshold: int):
 
     print("-" * 110 + "\n")
 
+def handle_revoke_access(email: str, plex_service: PlexService, grant_service: GrantService, dry_run: bool):
+    """Opción 5: Revoke Plex library access for email immediately."""
+    logger.info(f"[OPTION 5] Revoking Plex library access for '{email}'...")
+    grant_service.remove_pass(email)
+    result = plex_service.revoke_user_access(email=email, dry_run=dry_run)
+
+    log_disabled_user(
+        email=email,
+        customer_name="Manual Revocation",
+        invoice_numbers=["MANUAL-REVOKE"],
+        max_days_overdue=0,
+        action=result["action"],
+        status=result["status"],
+        dry_run=dry_run
+    )
+    logger.info(f"Revocation completed for '{email}'. Status: {result['status']}")
+
 def main():
     args = parse_args()
 
@@ -322,6 +346,15 @@ def main():
     if args.grant_permanent:
         handle_grant_permanent(
             email=args.grant_permanent,
+            plex_service=plex_service,
+            grant_service=grant_service,
+            dry_run=args.dry_run
+        )
+        sys.exit(0)
+
+    if args.revoke_access:
+        handle_revoke_access(
+            email=args.revoke_access,
             plex_service=plex_service,
             grant_service=grant_service,
             dry_run=args.dry_run
@@ -430,6 +463,30 @@ def main():
             customer_name = user_info["customer_name"]
             invoice_numbers = user_info["invoice_numbers"]
             max_days = user_info["max_days_overdue"]
+
+            # Process 20+ days overdue invoices (Void invoice with "No Renovó" + Stop recurring invoice)
+            details = user_info.get("overdue_invoices_details", [])
+            for inv_detail in details:
+                days_ov = inv_detail.get("days_overdue", 0)
+                inv_id = inv_detail.get("invoice_id")
+                inv_num = inv_detail.get("invoice_number")
+                cust_id = inv_detail.get("customer_id") or user_info.get("customer_id")
+
+                if days_ov >= 20:
+                    logger.info(f"Invoice #{inv_num} is {days_ov} days overdue (>= 20 days). Voiding invoice and stopping recurring invoice...")
+                    if args.dry_run:
+                        logger.info(f"[DRY-RUN] Would mark invoice #{inv_num} (ID: {inv_id}) as VOID ('No Renovó') and STOP recurring invoice for customer {cust_id}.")
+                    else:
+                        if inv_id:
+                            try:
+                                zoho_service.void_invoice(invoice_id=inv_id, reason="No Renovó")
+                            except Exception as e:
+                                logger.error(f"Failed to void invoice #{inv_num}: {e}")
+                        if cust_id:
+                            try:
+                                zoho_service.stop_recurring_invoices_for_customer(customer_id=cust_id)
+                            except Exception as e:
+                                logger.error(f"Failed to stop recurring invoice for customer {cust_id}: {e}")
 
             result = plex_service.revoke_user_access(email=email, dry_run=args.dry_run)
 

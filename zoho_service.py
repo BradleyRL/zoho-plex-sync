@@ -1,131 +1,83 @@
-from datetime import datetime, date
-from typing import Dict, List, Any, Optional
 import requests
-from config import config
+from typing import List, Dict, Any, Optional
+from datetime import datetime, date
 from logger_service import logger
 
 class ZohoBooksService:
-    def __init__(self, cfg=config):
+    def __init__(self, cfg):
         self.cfg = cfg
-        self._access_token: Optional[str] = None
+        self.access_token: Optional[str] = None
 
-    def refresh_access_token(self) -> str:
-        """Refreshes the OAuth 2.0 access token using the refresh token."""
+    def get_access_token(self) -> str:
+        """
+        Retrieves a valid OAuth2 access token using the refresh token.
+        Always requests a fresh token to eliminate expiration edge cases.
+        """
         url = f"{self.cfg.ZOHO_ACCOUNTS_URL}/oauth/v2/token"
-        
-        # Sanitize credentials (strip whitespace, single & double quotes)
-        clean_refresh_token = self.cfg.ZOHO_REFRESH_TOKEN.strip().strip("'\"")
-        clean_client_id = self.cfg.ZOHO_CLIENT_ID.strip().strip("'\"")
-        clean_client_secret = self.cfg.ZOHO_CLIENT_SECRET.strip().strip("'\"")
-
         params = {
-            "refresh_token": clean_refresh_token,
-            "client_id": clean_client_id,
-            "client_secret": clean_client_secret,
+            "refresh_token": self.cfg.ZOHO_REFRESH_TOKEN,
+            "client_id": self.cfg.ZOHO_CLIENT_ID,
+            "client_secret": self.cfg.ZOHO_CLIENT_SECRET,
             "grant_type": "refresh_token"
         }
         
-        logger.info(f"Refreshing Zoho Books access token via {url}...")
+        logger.debug("Requesting new access token from Zoho OAuth endpoint...")
+        resp = requests.post(url, params=params, timeout=30)
         
-        # Standard RFC 6749 form-urlencoded POST
-        response = requests.post(url, data=params, timeout=30)
-        data = response.json() if response.content else {}
-
-        # Fallback to query params if data payload returns error
-        if "access_token" not in data:
-            logger.info("Attempting fallback OAuth refresh with URL query parameters...")
-            response = requests.post(url, params=params, timeout=30)
-            data = response.json() if response.content else {}
-        
-        if "access_token" not in data:
-            error_code = data.get("error", "unknown_error")
-            working_domain = self.test_all_domains()
-
-            if working_domain and working_domain != self.cfg.ZOHO_DOMAIN:
-                msg = (
-                    f"SUCCESS: Found working Zoho domain '{working_domain}'! "
-                    f"Your .env currently has ZOHO_DOMAIN={self.cfg.ZOHO_DOMAIN}. "
-                    f"Please update your .env to: ZOHO_DOMAIN={working_domain}"
-                )
-            elif error_code == "invalid_code":
-                msg = (
-                    f"Zoho error 'invalid_code' from {url}.\n"
-                    "Possible causes:\n"
-                    " 1. The ZOHO_REFRESH_TOKEN in .env is invalid or contains a 10-min Grant Code instead of a Refresh Token.\n"
-                    " 2. ZOHO_CLIENT_ID / ZOHO_CLIENT_SECRET does not match the app that generated the token.\n"
-                    " 3. Make sure to generate the Grant Code in the Zoho API Console for the correct region."
-                )
-            elif error_code == "invalid_client":
-                msg = f"Zoho error 'invalid_client': ZOHO_CLIENT_ID or ZOHO_CLIENT_SECRET in .env is incorrect."
-            else:
-                msg = f"Failed to refresh Zoho access token: {error_code} ({data})"
+        if resp.status_code != 200:
+            logger.error(f"Failed to refresh Zoho token: {resp.status_code} - {resp.text}")
+            raise RuntimeError(f"Failed to refresh Zoho token: {resp.status_code} - {resp.text}")
             
-            logger.error(msg)
-            raise ValueError(msg)
-        
-        self._access_token = data["access_token"]
-        return self._access_token
+        data = resp.json()
+        if "access_token" not in data:
+            logger.error(f"Access token missing in Zoho OAuth response: {data}")
+            raise RuntimeError(f"Access token missing in response: {data}")
 
-    def test_all_domains(self) -> Optional[str]:
-        """
-        Tests token refresh across all known Zoho domains (.com, .eu, .in, .com.au, .ca)
-        to identify if the issue is a regional domain mismatch.
-        Returns the working domain string if found, or None.
-        """
-        domains = ["com", "eu", "in", "com.au", "ca", "zohocloud.ca"]
-        clean_refresh_token = self.cfg.ZOHO_REFRESH_TOKEN.strip().strip("'\"")
-        clean_client_id = self.cfg.ZOHO_CLIENT_ID.strip().strip("'\"")
-        clean_client_secret = self.cfg.ZOHO_CLIENT_SECRET.strip().strip("'\"")
-
-        params = {
-            "refresh_token": clean_refresh_token,
-            "client_id": clean_client_id,
-            "client_secret": clean_client_secret,
-            "grant_type": "refresh_token"
-        }
-
-        for dom in domains:
-            url = f"https://accounts.zoho.{dom}/oauth/v2/token"
-            try:
-                resp = requests.post(url, data=params, timeout=10)
-                data = resp.json() if resp.content else {}
-                if "access_token" in data:
-                    return dom
-            except Exception:
-                pass
-        return None
+        self.access_token = data["access_token"]
+        return self.access_token
 
     def get_headers(self) -> Dict[str, str]:
-        if not self._access_token:
-            self.refresh_access_token()
+        token = self.get_access_token()
         return {
-            "Authorization": f"Zoho-oauthtoken {self._access_token}",
+            "Authorization": f"Zoho-oauthtoken {token}",
             "Content-Type": "application/json"
         }
 
     def fetch_contact_email(self, customer_id: str) -> Optional[str]:
-        """Fetches contact email from Zoho Books if invoice does not contain it."""
+        """
+        Fetches contact person details for a customer ID from Zoho Books
+        to retrieve the primary email address if not included in invoice payload.
+        """
         url = f"{self.cfg.ZOHO_BOOKS_API_URL}/contacts/{customer_id}"
         params = {"organization_id": self.cfg.ZOHO_ORGANIZATION_ID}
         try:
             resp = requests.get(url, headers=self.get_headers(), params=params, timeout=30)
             if resp.status_code == 200:
                 contact = resp.json().get("contact", {})
-                return contact.get("email") or contact.get("contact_persons", [{}])[0].get("email")
+                email = contact.get("email")
+                if email:
+                    return email.strip().lower()
+                # Check contact persons array if top-level email is empty
+                for cp in contact.get("contact_persons", []):
+                    cp_email = cp.get("email")
+                    if cp_email:
+                        return cp_email.strip().lower()
         except Exception as e:
             logger.warning(f"Could not fetch contact details for customer {customer_id}: {e}")
         return None
 
     def get_overdue_invoices(self) -> List[Dict[str, Any]]:
         """
-        Fetches all unpaid & overdue invoices from Zoho Books (handling pagination).
-        Queries both 'overdue' and 'unpaid' statuses to ensure no past-due invoice is missed.
+        Fetches all unpaid invoices from Zoho Books API across statuses: unpaid, overdue, sent, partially_paid.
+        Handles pagination and deduping across status queries.
         """
         url = f"{self.cfg.ZOHO_BOOKS_API_URL}/invoices"
         invoice_map: Dict[str, Dict[str, Any]] = {}
 
-        # Query both 'overdue' and 'unpaid' (which includes sent & partially_paid)
-        for status_filter in ["overdue", "unpaid"]:
+        # Statuses to query to catch all unpaid or overdue invoices
+        statuses = ["unpaid", "overdue", "sent", "partially_paid"]
+
+        for status_filter in statuses:
             page = 1
             while True:
                 params = {
@@ -135,18 +87,22 @@ class ZohoBooksService:
                     "per_page": 200
                 }
                 logger.info(f"Fetching '{status_filter}' invoices from Zoho Books (Page {page})...")
+                
                 try:
                     resp = requests.get(url, headers=self.get_headers(), params=params, timeout=30)
                     resp.raise_for_status()
                     data = resp.json()
-
+                    
                     if data.get("code") != 0:
-                        logger.error(f"Zoho API returned error code {data.get('code')}: {data.get('message')}")
+                        logger.error(f"Zoho API error: {data.get('message')}")
                         break
 
-                    invoices = data.get("invoices", [])
-                    for inv in invoices:
-                        inv_id = inv.get("invoice_id") or inv.get("invoice_number")
+                    invoices_page = data.get("invoices", [])
+                    if not invoices_page:
+                        break
+
+                    for inv in invoices_page:
+                        inv_id = inv.get("invoice_id")
                         if inv_id and inv_id not in invoice_map:
                             invoice_map[inv_id] = inv
 
@@ -187,7 +143,8 @@ class ZohoBooksService:
                 "customer_name": "John Doe",
                 "customer_id": "12345",
                 "invoice_numbers": ["INV-001"],
-                "max_days_overdue": 5
+                "max_days_overdue": 5,
+                "overdue_invoices_details": [...]
             }
         ]
         """
@@ -228,18 +185,28 @@ class ZohoBooksService:
                 )
                 continue
 
+            invoice_id = inv.get("invoice_id")
+
             for email_clean in target_emails:
+                inv_detail = {
+                    "invoice_id": invoice_id,
+                    "invoice_number": invoice_num,
+                    "days_overdue": days_overdue,
+                    "customer_id": customer_id
+                }
                 if email_clean not in user_map:
                     user_map[email_clean] = {
                         "email": email_clean,
                         "customer_name": inv.get("customer_name", "Unknown"),
                         "customer_id": customer_id,
                         "invoice_numbers": [invoice_num],
-                        "max_days_overdue": days_overdue
+                        "max_days_overdue": days_overdue,
+                        "overdue_invoices_details": [inv_detail]
                     }
                 else:
                     if invoice_num not in user_map[email_clean]["invoice_numbers"]:
                         user_map[email_clean]["invoice_numbers"].append(invoice_num)
+                        user_map[email_clean]["overdue_invoices_details"].append(inv_detail)
                     user_map[email_clean]["max_days_overdue"] = max(
                         user_map[email_clean]["max_days_overdue"], days_overdue
                     )
@@ -615,3 +582,68 @@ class ZohoBooksService:
         rec_num = rec_invoice.get("recurring_invoice_number", rec_id)
         logger.info(f"Successfully created Recurring Invoice #{rec_num} for customer '{recurrence_name}'.")
         return rec_invoice
+
+    def void_invoice(self, invoice_id: str, reason: str = "No Renovó") -> Dict[str, Any]:
+        """
+        Marks an invoice as VOID in Zoho Books with the specified reason.
+        API Endpoint: POST /invoices/{invoice_id}/status/void
+        """
+        if not invoice_id:
+            logger.warning("void_invoice called without invoice_id. Skipping.")
+            return {}
+
+        url = f"{self.cfg.ZOHO_BOOKS_API_URL}/invoices/{invoice_id}/status/void"
+        params = {
+            "organization_id": self.cfg.ZOHO_ORGANIZATION_ID,
+            "reason": reason
+        }
+        logger.info(f"Marking invoice ID '{invoice_id}' as VOID in Zoho Books (Reason: '{reason}')...")
+        resp = requests.post(url, headers=self.get_headers(), params=params, json={"reason": reason}, timeout=30)
+        data = resp.json() if resp.content else {}
+
+        if resp.status_code not in (200, 201) or data.get("code") != 0:
+            err_msg = data.get("message") or f"HTTP {resp.status_code}: {resp.text}"
+            logger.error(f"Zoho API error voiding invoice '{invoice_id}': {err_msg}")
+            raise RuntimeError(f"Zoho API error voiding invoice: {err_msg}")
+
+        logger.info(f"Successfully voided invoice '{invoice_id}' in Zoho Books.")
+        return data
+
+    def stop_recurring_invoices_for_customer(self, customer_id: str) -> List[Dict[str, Any]]:
+        """
+        Fetches all active recurring invoices for a customer and stops them.
+        API Endpoint: POST /recurringinvoices/{recurring_invoice_id}/status/stop
+        """
+        if not customer_id:
+            logger.warning("stop_recurring_invoices_for_customer called without customer_id. Skipping.")
+            return []
+
+        url_search = f"{self.cfg.ZOHO_BOOKS_API_URL}/recurringinvoices"
+        params_search = {
+            "organization_id": self.cfg.ZOHO_ORGANIZATION_ID,
+            "customer_id": customer_id,
+            "status": "active"
+        }
+        stopped = []
+        try:
+            resp = requests.get(url_search, headers=self.get_headers(), params=params_search, timeout=30)
+            if resp.status_code == 200:
+                rec_list = resp.json().get("recurring_invoices", [])
+                for rec in rec_list:
+                    rec_id = rec.get("recurring_invoice_id")
+                    rec_num = rec.get("recurring_invoice_number", rec_id)
+                    if rec_id:
+                        url_stop = f"{self.cfg.ZOHO_BOOKS_API_URL}/recurringinvoices/{rec_id}/status/stop"
+                        params_stop = {"organization_id": self.cfg.ZOHO_ORGANIZATION_ID}
+                        logger.info(f"Stopping active recurring invoice #{rec_num} (ID: {rec_id}) for customer {customer_id}...")
+                        resp_stop = requests.post(url_stop, headers=self.get_headers(), params=params_stop, timeout=30)
+                        data_stop = resp_stop.json() if resp_stop.content else {}
+                        if resp_stop.status_code in (200, 201) and data_stop.get("code") == 0:
+                            logger.info(f"Stopped recurring invoice #{rec_num} for customer {customer_id}.")
+                            stopped.append({"recurring_invoice_id": rec_id, "recurring_invoice_number": rec_num})
+                        else:
+                            logger.warning(f"Could not stop recurring invoice #{rec_num}: {data_stop.get('message')}")
+        except Exception as e:
+            logger.error(f"Error stopping recurring invoices for customer {customer_id}: {e}")
+
+        return stopped

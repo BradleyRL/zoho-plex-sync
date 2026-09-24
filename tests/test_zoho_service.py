@@ -83,3 +83,59 @@ def test_get_active_recurring_invoice_emails():
             with patch.object(service, "fetch_all_contact_emails", side_effect=mock_contact_emails):
                 emails = service.get_active_recurring_invoice_emails()
                 assert emails == {"active1@example.com", "active2@example.com", "secondary_c101@example.com"}
+
+def test_void_invoice():
+    mock_cfg = MagicMock()
+    mock_cfg.ZOHO_BOOKS_API_URL = "https://zohoapis.com/books/v3"
+    mock_cfg.ZOHO_ORGANIZATION_ID = "org123"
+    service = ZohoBooksService(cfg=mock_cfg)
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.content = b'{"code": 0, "message": "The invoice has been marked as void."}'
+    mock_resp.json.return_value = {"code": 0, "message": "The invoice has been marked as void."}
+
+    with patch("requests.post", return_value=mock_resp) as mock_post:
+        with patch.object(service, "get_headers", return_value={"Authorization": "Bearer token"}):
+            res = service.void_invoice("inv_999", reason="No Renovó")
+            assert res["code"] == 0
+            mock_post.assert_called_once_with(
+                "https://zohoapis.com/books/v3/invoices/inv_999/status/void",
+                headers={"Authorization": "Bearer token"},
+                params={"organization_id": "org123", "reason": "No Renovó"},
+                json={"reason": "No Renovó"},
+                timeout=30
+            )
+
+def test_stop_recurring_invoices_for_customer():
+    mock_cfg = MagicMock()
+    mock_cfg.ZOHO_BOOKS_API_URL = "https://zohoapis.com/books/v3"
+    mock_cfg.ZOHO_ORGANIZATION_ID = "org123"
+    service = ZohoBooksService(cfg=mock_cfg)
+
+    search_resp = MagicMock()
+    search_resp.status_code = 200
+    search_resp.json.return_value = {
+        "code": 0,
+        "recurring_invoices": [
+            {"recurring_invoice_id": "rec_100", "recurring_invoice_number": "REC-100", "status": "active"}
+        ]
+    }
+
+    stop_resp = MagicMock()
+    stop_resp.status_code = 200
+    stop_resp.content = b'{"code": 0, "message": "Stopped"}'
+    stop_resp.json.return_value = {"code": 0, "message": "Stopped"}
+
+    with patch("requests.get", return_value=search_resp) as mock_get:
+        with patch("requests.post", return_value=stop_resp) as mock_post:
+            with patch.object(service, "get_headers", return_value={"Authorization": "Bearer token"}):
+                stopped = service.stop_recurring_invoices_for_customer("cust_123")
+                assert len(stopped) == 1
+                assert stopped[0]["recurring_invoice_id"] == "rec_100"
+                mock_post.assert_called_once_with(
+                    "https://zohoapis.com/books/v3/recurringinvoices/rec_100/status/stop",
+                    headers={"Authorization": "Bearer token"},
+                    params={"organization_id": "org123"},
+                    timeout=30
+                )
