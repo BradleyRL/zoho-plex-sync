@@ -392,15 +392,29 @@ class ZohoBooksService:
     def create_customer(self, contact_name: str, email: str, currency_code: str = "GTQ") -> str:
         """
         Creates a new customer contact in Zoho Books (or returns existing customer_id if email or name exists).
+        Includes contact_persons array so Zoho attaches the primary email address.
         Default currency_code is 'GTQ'.
         """
         clean_email = email.strip().lower()
         clean_name = contact_name.strip()
 
-        # 1. Search existing customer by email
+        name_parts = clean_name.split(maxsplit=1)
+        first_name = name_parts[0] if name_parts else clean_name
+        last_name = name_parts[1] if len(name_parts) > 1 else ""
+
+        contact_persons = [
+            {
+                "first_name": first_name,
+                "last_name": last_name,
+                "email": clean_email,
+                "is_primary_contact": True
+            }
+        ]
+
         url_contacts = f"{self.cfg.ZOHO_BOOKS_API_URL}/contacts"
         headers = self.get_headers()
         
+        # 1. Search existing customer by email
         try:
             resp_email = requests.get(
                 url_contacts,
@@ -430,6 +444,26 @@ class ZohoBooksService:
                 for c in contacts:
                     if c.get("contact_name", "").strip().lower() == clean_name.lower():
                         cid = c.get("contact_id")
+                        c_email = c.get("email")
+                        if not c_email:
+                            logger.info(f"Found existing customer '{clean_name}' (ID {cid}) without email. Updating contact with email '{clean_email}'...")
+                            url_update = f"{url_contacts}/{cid}"
+                            update_payload = {
+                                "contact_name": clean_name,
+                                "email": clean_email,
+                                "contact_persons": contact_persons
+                            }
+                            try:
+                                requests.put(
+                                    url_update,
+                                    headers=headers,
+                                    params={"organization_id": self.cfg.ZOHO_ORGANIZATION_ID},
+                                    json=update_payload,
+                                    timeout=30
+                                )
+                            except Exception as ex:
+                                logger.warning(f"Failed to update customer email in Zoho Books: {ex}")
+
                         logger.info(f"Found existing customer in Zoho Books by name '{clean_name}': ID {cid}")
                         return str(cid)
         except Exception as e:
@@ -440,7 +474,8 @@ class ZohoBooksService:
         payload = {
             "contact_name": clean_name,
             "email": clean_email,
-            "currency_code": currency_code
+            "currency_code": currency_code,
+            "contact_persons": contact_persons
         }
         
         resp = requests.post(
@@ -460,7 +495,8 @@ class ZohoBooksService:
             
             payload_fallback = {
                 "contact_name": clean_name,
-                "email": clean_email
+                "email": clean_email,
+                "contact_persons": contact_persons
             }
             resp_fallback = requests.post(
                 url_contacts,
