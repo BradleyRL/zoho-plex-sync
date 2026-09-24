@@ -133,7 +133,7 @@ class PlexService:
                 
                 # Filter out the restricted libraries
                 remaining_sections = [
-                    sec for sec in all_sections if sec.title.lower() not in restricted_lower
+                    sec.title for sec in all_sections if sec.title.lower() not in restricted_lower
                 ]
 
                 # Update user shared sections
@@ -217,11 +217,11 @@ class PlexService:
 
             if user:
                 # User exists in Plex friends -> Update shared sections
-                account.updateFriend(user=user, server=server, sections=target_sections)
+                account.updateFriend(user=user, server=server, sections=section_names)
                 logger.info(f"Updated access for Plex user '{email_clean}': [{', '.join(section_names)}]")
             else:
                 # User does not exist in Plex friends -> Invite user
-                account.inviteFriend(user=email_clean, server=server, sections=target_sections)
+                account.inviteFriend(user=email_clean, server=server, sections=section_names)
                 logger.info(f"Invited new user '{email_clean}' to Plex server with libraries: [{', '.join(section_names)}]")
 
             return {

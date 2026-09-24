@@ -94,7 +94,7 @@ def test_revoke_user_access_update_libraries():
 
     assert res["found"] is True
     assert res["status"] == "SUCCESS"
-    mock_account.updateFriend.assert_called_once_with(user=user, server=mock_server, sections=[sec2])
+    mock_account.updateFriend.assert_called_once_with(user=user, server=mock_server, sections=["TV Shows"])
 
 def test_revoke_user_access_already_disabled():
     mock_cfg = MagicMock()
