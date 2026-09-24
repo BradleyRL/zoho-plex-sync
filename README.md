@@ -14,7 +14,7 @@ Permite además gestionar pases temporales por 2 días (o 3 días si se otorga u
    - Genera logs diarios en `logs/disabled_users_YYYY-MM-DD.log`.
 
 2. **4 Opciones de Gestión de Accesos por CLI**:
-   - **`--grant-temp EMAIL [--days 2]`**: Otorga acceso temporal por 2 días. **Si se otorga un Viernes, se extiende automáticamente a 3 días para cubrir todo el fin de semana hasta el Lunes**. Al vencer el pase, el script revoca el acceso automáticamente.
+   - **`--grant-temp EMAIL --name "NOMBRE CLIENTE" [--days 2]`**: Crea/asocia el cliente en Zoho Books (`currency_code="GTQ"`), guarda su `customer_id` y le otorga acceso temporal por 2 días (o 3 días si es Viernes). Al vencer el pase, el script revoca el acceso en Plex y crea automáticamente una Factura Recurrente en Zoho Books.
    - **`--grant-invoice RECURRING_INVOICE_NUM`**: Busca el número de factura recurrente en Zoho Books y le restituye el acceso al usuario.
    - **`--grant-permanent EMAIL`**: Otorga acceso permanente en Plex (sin temporizador de expiración). **Sujeto a desactivación si presenta facturas en mora mayores a 3 días en Zoho Books**.
    - **`--list-inactive-plex`**: Muestra una lista de los usuarios de Plex que **NO** tienen una factura recurrente activa en Zoho Books.
@@ -53,20 +53,25 @@ PLEX_LIBRARIES=Peliculas,Series
 
 # Días de mora requeridos
 OVERDUE_DAYS_THRESHOLD=3
+
+# Configuración del Bot de Discord
+DISCORD_BOT_TOKEN=tu_token_de_bot_discord
+DISCORD_ALLOWED_USERS=123456789012345678,987654321098765432
+DISCORD_GUILD_ID=123456789012345678
 ```
 
 ---
 
 ## Uso del Script
 
-### Comandos de Gestión
+### Comandos de Gestión CLI
 
 ```bash
 # Validar configuración
 python3 main.py --check-config
 
-# 1. Acceso temporal (2 días entre semana, 3 días si se otorga un Viernes)
-python3 main.py --grant-temp usuario@ejemplo.com
+# 1. Acceso temporal (requiere --name, crea cliente en Zoho GTQ y Factura Recurrente al vencer)
+python3 main.py --grant-temp usuario@ejemplo.com --name "Nombre Cliente"
 
 # 2. Restablecer acceso enviando el # de factura recurrente de Zoho
 python3 main.py --grant-invoice REC-INV-1002
@@ -81,7 +86,29 @@ python3 main.py --list-inactive-plex
 python3 main.py --dry-run
 ```
 
-### Sincronización Diaria Automática (Cron)
+---
+
+## Bot de Discord (Slash Commands)
+
+Puedes ejecutar el bot de Discord para administrar todos los comandos desde tu servidor usando **Slash Commands**:
+
+```bash
+python3 discord_bot.py
+```
+
+### Comandos Disponibles en Discord:
+- **`/grant_temp <email> <name> [days] [dry_run]`**: Otorga un pase temporal, registra al cliente en Zoho Books (`GTQ`) y crea Factura Recurrente al vencer.
+- **`/grant_invoice <invoice_num> [dry_run]`**: Restablece acceso buscando por el número de factura recurrente.
+- **`/grant_permanent <email> [dry_run]`**: Otorga un pase permanente en Plex.
+- **`/list_inactive_plex`**: Muestra usuarios de Plex sin factura recurrente activa en Zoho.
+- **`/show_invoices [threshold]`**: Consulta facturas pendientes/vencidas en Zoho Books.
+- **`/sync [dry_run] [threshold]`**: Ejecuta el proceso de sincronización diaria completo.
+- **`/check_config`**: Valida las credenciales y configuración del sistema.
+- **`/help`**: Despliega el menú de ayuda interactivo con Embeds.
+
+---
+
+## Sincronización Diaria Automática (Cron)
 Para ejecutar el script diariamente a las 02:00 AM:
 
 ```cron

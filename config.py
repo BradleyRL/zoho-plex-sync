@@ -36,6 +36,22 @@ class Config:
             return []
         return [lib.strip() for lib in self._PLEX_LIBRARIES_RAW.split(",") if lib.strip()]
 
+    # Discord settings
+    DISCORD_BOT_TOKEN: str = os.getenv("DISCORD_BOT_TOKEN", "")
+    _DISCORD_ALLOWED_USERS_RAW: str = os.getenv("DISCORD_ALLOWED_USERS", "")
+    DISCORD_GUILD_ID: str = os.getenv("DISCORD_GUILD_ID", "")
+
+    @property
+    def DISCORD_ALLOWED_USERS(self) -> list[int]:
+        if not self._DISCORD_ALLOWED_USERS_RAW:
+            return []
+        ids = []
+        for u_id in self._DISCORD_ALLOWED_USERS_RAW.split(","):
+            u_id_clean = u_id.strip()
+            if u_id_clean.isdigit():
+                ids.append(int(u_id_clean))
+        return ids
+
     # Business Rules
     OVERDUE_DAYS_THRESHOLD: int = int(os.getenv("OVERDUE_DAYS_THRESHOLD", "3"))
 

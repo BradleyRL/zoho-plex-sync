@@ -389,10 +389,66 @@ class ZohoBooksService:
 
         return active_emails
 
+    def _ensure_contact_person_email(self, contact_id: str, contact_name: str, email: str):
+        """
+        Ensures that the contact in Zoho Books (identified by contact_id)
+        has a primary contact person with the specified email address.
+        """
+        clean_email = email.strip().lower()
+        clean_name = contact_name.strip()
+        name_parts = clean_name.split(maxsplit=1)
+        first_name = name_parts[0] if name_parts else clean_name
+        last_name = name_parts[1] if len(name_parts) > 1 else ""
+
+        url_contact = f"{self.cfg.ZOHO_BOOKS_API_URL}/contacts/{contact_id}"
+        headers = self.get_headers()
+        params = {"organization_id": self.cfg.ZOHO_ORGANIZATION_ID}
+
+        try:
+            resp = requests.get(url_contact, headers=headers, params=params, timeout=30)
+            if resp.status_code == 200:
+                contact_data = resp.json().get("contact", {})
+                contact_persons = contact_data.get("contact_persons", [])
+                
+                # Check if email is already present on primary or any contact person
+                for cp in contact_persons:
+                    if (cp.get("email") or "").strip().lower() == clean_email:
+                        logger.info(f"Contact ID {contact_id} already has email '{clean_email}' attached.")
+                        return
+
+                if contact_persons:
+                    # Update existing primary contact person with the email
+                    primary_cp = next((cp for cp in contact_persons if cp.get("is_primary_contact")), contact_persons[0])
+                    cp_id = primary_cp.get("contact_person_id")
+                    url_cp_update = f"{self.cfg.ZOHO_BOOKS_API_URL}/contacts/contactpersons/{cp_id}"
+                    cp_payload = {
+                        "first_name": primary_cp.get("first_name") or first_name,
+                        "last_name": primary_cp.get("last_name") or last_name,
+                        "email": clean_email,
+                        "is_primary_contact": True
+                    }
+                    logger.info(f"Updating contact person {cp_id} for customer {contact_id} with email '{clean_email}'...")
+                    requests.put(url_cp_update, headers=headers, params=params, json=cp_payload, timeout=30)
+                else:
+                    # Create a new primary contact person
+                    url_cp_create = f"{self.cfg.ZOHO_BOOKS_API_URL}/contacts/contactpersons"
+                    cp_payload = {
+                        "contact_id": contact_id,
+                        "first_name": first_name,
+                        "last_name": last_name,
+                        "email": clean_email,
+                        "is_primary_contact": True
+                    }
+                    logger.info(f"Creating new primary contact person for customer {contact_id} with email '{clean_email}'...")
+                    requests.post(url_cp_create, headers=headers, params=params, json=cp_payload, timeout=30)
+
+        except Exception as e:
+            logger.warning(f"Could not verify/update contact person email for customer {contact_id}: {e}")
+
     def create_customer(self, contact_name: str, email: str, currency_code: str = "GTQ") -> str:
         """
         Creates a new customer contact in Zoho Books (or returns existing customer_id if email or name exists).
-        Includes contact_persons array so Zoho attaches the primary email address.
+        Ensures the primary contact person has the specified email address.
         Default currency_code is 'GTQ'.
         """
         clean_email = email.strip().lower()
@@ -413,6 +469,7 @@ class ZohoBooksService:
 
         url_contacts = f"{self.cfg.ZOHO_BOOKS_API_URL}/contacts"
         headers = self.get_headers()
+        cid = None
         
         # 1. Search existing customer by email
         try:
@@ -425,101 +482,86 @@ class ZohoBooksService:
             if resp_email.status_code == 200:
                 contacts = resp_email.json().get("contacts", [])
                 if contacts:
-                    cid = contacts[0].get("contact_id")
+                    cid = str(contacts[0].get("contact_id"))
                     logger.info(f"Found existing customer in Zoho Books by email '{clean_email}': ID {cid}")
-                    return str(cid)
         except Exception as e:
             logger.warning(f"Error searching contact by email '{clean_email}': {e}")
 
-        # 2. Search existing customer by contact_name / search_text to avoid duplicate name error
-        try:
-            resp_name = requests.get(
-                url_contacts,
-                headers=headers,
-                params={"organization_id": self.cfg.ZOHO_ORGANIZATION_ID, "search_text": clean_name},
-                timeout=30
-            )
-            if resp_name.status_code == 200:
-                contacts = resp_name.json().get("contacts", [])
-                for c in contacts:
-                    if c.get("contact_name", "").strip().lower() == clean_name.lower():
-                        cid = c.get("contact_id")
-                        c_email = c.get("email")
-                        if not c_email:
-                            logger.info(f"Found existing customer '{clean_name}' (ID {cid}) without email. Updating contact with email '{clean_email}'...")
-                            url_update = f"{url_contacts}/{cid}"
-                            update_payload = {
-                                "contact_name": clean_name,
-                                "email": clean_email,
-                                "contact_persons": contact_persons
-                            }
-                            try:
-                                requests.put(
-                                    url_update,
-                                    headers=headers,
-                                    params={"organization_id": self.cfg.ZOHO_ORGANIZATION_ID},
-                                    json=update_payload,
-                                    timeout=30
-                                )
-                            except Exception as ex:
-                                logger.warning(f"Failed to update customer email in Zoho Books: {ex}")
+        # 2. Search existing customer by contact_name / search_text if not found by email
+        if not cid:
+            try:
+                resp_name = requests.get(
+                    url_contacts,
+                    headers=headers,
+                    params={"organization_id": self.cfg.ZOHO_ORGANIZATION_ID, "search_text": clean_name},
+                    timeout=30
+                )
+                if resp_name.status_code == 200:
+                    contacts = resp_name.json().get("contacts", [])
+                    for c in contacts:
+                        if c.get("contact_name", "").strip().lower() == clean_name.lower():
+                            cid = str(c.get("contact_id"))
+                            logger.info(f"Found existing customer in Zoho Books by name '{clean_name}': ID {cid}")
+                            break
+            except Exception as e:
+                logger.warning(f"Error searching contact by name '{clean_name}': {e}")
 
-                        logger.info(f"Found existing customer in Zoho Books by name '{clean_name}': ID {cid}")
-                        return str(cid)
-        except Exception as e:
-            logger.warning(f"Error searching contact by name '{clean_name}': {e}")
-
-        # 3. Create new customer in Zoho Books
-        logger.info(f"Creating new customer in Zoho Books: '{clean_name}' ({clean_email})...")
-        payload = {
-            "contact_name": clean_name,
-            "email": clean_email,
-            "currency_code": currency_code,
-            "contact_persons": contact_persons
-        }
-        
-        resp = requests.post(
-            url_contacts,
-            headers=headers,
-            params={"organization_id": self.cfg.ZOHO_ORGANIZATION_ID},
-            json=payload,
-            timeout=30
-        )
-        
-        data = resp.json() if resp.content else {}
-
-        # If currency_code causes error or bad request, retry without currency_code (uses org base currency)
-        if resp.status_code not in (200, 201) or data.get("code") != 0:
-            err_msg = data.get("message", f"HTTP {resp.status_code}")
-            logger.warning(f"Initial create_customer attempt with currency_code='{currency_code}' returned: {err_msg}. Retrying without currency_code...")
-            
-            payload_fallback = {
+        # 3. Create new customer if not found
+        if not cid:
+            logger.info(f"Creating new customer in Zoho Books: '{clean_name}' ({clean_email})...")
+            payload = {
                 "contact_name": clean_name,
                 "email": clean_email,
+                "currency_code": currency_code,
                 "contact_persons": contact_persons
             }
-            resp_fallback = requests.post(
+            
+            resp = requests.post(
                 url_contacts,
                 headers=headers,
                 params={"organization_id": self.cfg.ZOHO_ORGANIZATION_ID},
-                json=payload_fallback,
+                json=payload,
                 timeout=30
             )
-            data_fallback = resp_fallback.json() if resp_fallback.content else {}
             
-            if resp_fallback.status_code in (200, 201) and data_fallback.get("code") == 0:
-                contact_id = data_fallback.get("contact", {}).get("contact_id")
-                logger.info(f"Successfully created customer '{clean_name}' in Zoho Books (default currency). ID: {contact_id}")
-                return str(contact_id)
-            else:
-                final_msg = data_fallback.get("message") or data.get("message") or f"HTTP {resp.status_code}: {resp.text}"
-                code = data_fallback.get("code") or data.get("code")
-                logger.error(f"Zoho API error creating customer '{clean_name}': {final_msg} (Code {code})")
-                raise RuntimeError(f"Zoho API error creating customer: {final_msg} (Code {code})")
+            data = resp.json() if resp.content else {}
 
-        contact_id = data.get("contact", {}).get("contact_id")
-        logger.info(f"Successfully created customer '{clean_name}' in Zoho Books. ID: {contact_id}")
-        return str(contact_id)
+            # If currency_code causes error or bad request, retry without currency_code (uses org base currency)
+            if resp.status_code not in (200, 201) or data.get("code") != 0:
+                err_msg = data.get("message", f"HTTP {resp.status_code}")
+                logger.warning(f"Initial create_customer attempt with currency_code='{currency_code}' returned: {err_msg}. Retrying without currency_code...")
+                
+                payload_fallback = {
+                    "contact_name": clean_name,
+                    "email": clean_email,
+                    "contact_persons": contact_persons
+                }
+                resp_fallback = requests.post(
+                    url_contacts,
+                    headers=headers,
+                    params={"organization_id": self.cfg.ZOHO_ORGANIZATION_ID},
+                    json=payload_fallback,
+                    timeout=30
+                )
+                data_fallback = resp_fallback.json() if resp_fallback.content else {}
+                
+                if resp_fallback.status_code in (200, 201) and data_fallback.get("code") == 0:
+                    cid = str(data_fallback.get("contact", {}).get("contact_id"))
+                    logger.info(f"Successfully created customer '{clean_name}' in Zoho Books (default currency). ID: {cid}")
+                else:
+                    final_msg = data_fallback.get("message") or data.get("message") or f"HTTP {resp.status_code}: {resp.text}"
+                    code = data_fallback.get("code") or data.get("code")
+                    logger.error(f"Zoho API error creating customer '{clean_name}': {final_msg} (Code {code})")
+                    raise RuntimeError(f"Zoho API error creating customer: {final_msg} (Code {code})")
+            else:
+                cid = str(data.get("contact", {}).get("contact_id"))
+                logger.info(f"Successfully created customer '{clean_name}' in Zoho Books. ID: {cid}")
+
+        # 4. Guarantee the primary contact person has the email address set
+        if cid:
+            self._ensure_contact_person_email(cid, clean_name, clean_email)
+
+        return cid
 
     def create_recurring_invoice(
         self,

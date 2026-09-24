@@ -4,7 +4,7 @@ Zoho Books Overdue Invoices to Plex Access Sync & Access Management Script.
 
 This script manages Plex library access based on Zoho Books overdue invoices (> 3 days),
 and supports CLI options for:
- 1. Granting 2-day temporary access by email (--grant-temp email --name customer_name)
+ 1. Granting 2-day temporary access by email (--grant-temp email)
  2. Granting access by Zoho Recurring Invoice # (--grant-invoice #)
  3. Granting permanent access by email (--grant-permanent email)
 """
