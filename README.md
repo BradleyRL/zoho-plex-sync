@@ -116,10 +116,19 @@ python3 discord_bot.py
 ---
 
 ## Sincronización Diaria Automática (Cron)
-Para ejecutar el script diariamente a las 02:00 AM:
+
+Para ejecutar el script diariamente a las 02:00 AM utilizando un Entorno Virtual (Venv):
+
+### Opción 1: Apuntando directamente al ejecutable de Python del Venv (Recomendado)
+*Nota: Al llamar directamente al binario de Python dentro de `venv/bin/python3`, Python reconoce e importa automáticamente todas las librerías instaladas sin requerir `source`.*
 
 ```cron
-0 2 * * * cd /ruta/al/proyecto && /usr/bin/python3 main.py >> logs/cron.log 2>&1
+0 2 * * * cd /ruta/al/proyecto && /ruta/al/proyecto/venv/bin/python3 main.py >> logs/cron.log 2>&1
+```
+
+### Opción 2: Ejecutando `source` mediante Bash
+```cron
+0 2 * * * cd /ruta/al/proyecto && /bin/bash -c "source venv/bin/activate && python3 main.py" >> logs/cron.log 2>&1
 ```
 
 ---
