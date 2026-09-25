@@ -5,7 +5,7 @@ Discord Bot for Zoho Books <-> Plex Sync Management.
 Allows authorized Discord users to execute all CLI commands via slash commands:
  - /grant_temp <email> <name> [days] [dry_run]
  - /grant_invoice <invoice_num> [dry_run]
- - /grant_permanent <email> [dry_run]
+ - /grant_permanent <email> [name] [dry_run]
  - /revoke_access <email> [dry_run]
  - /list_inactive_plex
  - /show_invoices [threshold]
@@ -247,14 +247,16 @@ async def grant_invoice(
     await interaction.followup.send(embed=embed)
 
 
-@bot.tree.command(name="grant_permanent", description="Opción 3: Otorgar acceso permanente a un correo electrónico")
+@bot.tree.command(name="grant_permanent", description="Opción 3: Otorgar acceso permanente a un correo electrónico (opcionalmente creando cliente y factura en Zoho)")
 @app_commands.describe(
     email="Correo electrónico del usuario de Plex",
-    dry_run="Simular sin modificar Plex"
+    name="Nombre del cliente para crear en Zoho Books y su factura recurrente (opcional)",
+    dry_run="Simular sin modificar Plex ni Zoho Books"
 )
 async def grant_permanent(
     interaction: discord.Interaction,
     email: str,
+    name: Optional[str] = None,
     dry_run: bool = False
 ):
     unauth_embed = check_auth_or_embed(interaction)
@@ -269,24 +271,57 @@ async def grant_permanent(
         if missing:
             return {"error": f"Configuración incompleta: {', '.join(missing)}"}
 
+        zoho_service = ZohoBooksService(cfg=config)
         plex_service = PlexService(cfg=config)
         grant_service = GrantService()
+
+        customer_id = None
+        rec_inv_status = None
+        clean_name = name.strip() if name and name.strip() else None
+
+        if clean_name:
+            if dry_run:
+                customer_id = "DRY_RUN_CUSTOMER_ID"
+                rec_inv_status = "[DRY-RUN] Se crearía factura recurrente"
+            else:
+                try:
+                    customer_id = zoho_service.create_customer(contact_name=clean_name, email=email, currency_code="GTQ")
+                except Exception as e:
+                    return {"error": f"Error al crear cliente en Zoho Books: {e}"}
+
+                today_str = datetime.now().strftime("%Y-%m-%d")
+                try:
+                    zoho_service.create_recurring_invoice(
+                        customer_id=customer_id,
+                        recurrence_name=clean_name,
+                        start_date=today_str,
+                        item_id="5251269000000090022",
+                        quantity=1,
+                        never_expires=True,
+                        payment_terms=0
+                    )
+                    rec_inv_status = "Creada exitosamente en Zoho Books"
+                except Exception as e:
+                    return {"error": f"Error al crear factura recurrente en Zoho Books: {e}"}
 
         grant_service.add_permanent_pass(email=email)
         result = plex_service.grant_user_access(email=email, dry_run=dry_run)
 
         log_disabled_user(
             email=email,
-            customer_name="Permanent Pass",
+            customer_name=clean_name or "Permanent Pass",
             invoice_numbers=["PERMANENT-PASS"],
             max_days_overdue=0,
-            action="Granted permanent library access",
+            action="Granted permanent library access" + (f" (Zoho Customer ID: {customer_id})" if customer_id else ""),
             status=result["status"],
             dry_run=dry_run
         )
 
         return {
             "email": email,
+            "name": clean_name,
+            "customer_id": customer_id,
+            "rec_inv_status": rec_inv_status,
             "status": result["status"],
             "dry_run": dry_run
         }
@@ -308,6 +343,12 @@ async def grant_permanent(
         color=color
     )
     embed.add_field(name="Email", value=data["email"], inline=True)
+    if data["name"]:
+        embed.add_field(name="Cliente Zoho", value=data["name"], inline=True)
+        if data["customer_id"]:
+            embed.add_field(name="Zoho Customer ID", value=data["customer_id"], inline=True)
+        if data["rec_inv_status"]:
+            embed.add_field(name="Factura Recurrente Zoho", value=data["rec_inv_status"], inline=False)
     embed.add_field(name="Estado Plex", value=f"`{data['status']}`", inline=True)
     embed.add_field(name="Modo", value="`[DRY-RUN]`" if dry_run else "`[LIVE]`", inline=True)
 
@@ -827,8 +868,8 @@ async def help_command(interaction: discord.Interaction):
         inline=False
     )
     embed.add_field(
-        name="♾️ `/grant_permanent <email> [dry_run]`",
-        value="Otorga acceso permanente en Plex evitando revocaciones automáticas.",
+        name="♾️ `/grant_permanent <email> [name] [dry_run]`",
+        value="Otorga acceso permanente en Plex. Si se proporciona `name`, también crea el cliente en Zoho Books (GTQ) y su factura recurrente.",
         inline=False
     )
     embed.add_field(

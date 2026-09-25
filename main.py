@@ -166,18 +166,54 @@ def handle_grant_invoice(invoice_num: str, zoho_service: ZohoBooksService, plex_
     )
     logger.info(f"Access granted successfully for '{email}' via recurring invoice #{rec_num}.")
 
-def handle_grant_permanent(email: str, plex_service: PlexService, grant_service: GrantService, dry_run: bool):
-    """Opción 3: Grant permanent access by email."""
+def handle_grant_permanent(
+    email: str,
+    customer_name: Optional[str],
+    zoho_service: ZohoBooksService,
+    plex_service: PlexService,
+    grant_service: GrantService,
+    dry_run: bool
+):
+    """Opción 3: Grant permanent access by email, optionally creating Zoho customer and recurring invoice."""
     logger.info(f"[OPTION 3] Granting permanent access for '{email}'...")
+    customer_id = None
+    if customer_name:
+        logger.info(f"[OPTION 3] Creating/fetching customer '{customer_name}' in Zoho Books (currency GTQ)...")
+        if dry_run:
+            logger.info(f"[DRY-RUN] Would create customer '{customer_name}' ({email}) in Zoho Books with currency GTQ.")
+            customer_id = "DRY_RUN_CUSTOMER_ID"
+        else:
+            try:
+                customer_id = zoho_service.create_customer(contact_name=customer_name, email=email, currency_code="GTQ")
+            except Exception as e:
+                logger.error(f"Failed to create customer in Zoho Books: {e}")
+                sys.exit(1)
+
+            today_str = datetime.now().strftime("%Y-%m-%d")
+            try:
+                logger.info(f"[OPTION 3] Creating recurring invoice in Zoho Books for customer ID '{customer_id}'...")
+                zoho_service.create_recurring_invoice(
+                    customer_id=customer_id,
+                    recurrence_name=customer_name,
+                    start_date=today_str,
+                    item_id="5251269000000090022",
+                    quantity=1,
+                    never_expires=True,
+                    payment_terms=0
+                )
+            except Exception as e:
+                logger.error(f"Failed to create recurring invoice in Zoho Books: {e}")
+                sys.exit(1)
+
     grant_service.add_permanent_pass(email=email)
     result = plex_service.grant_user_access(email=email, dry_run=dry_run)
 
     log_disabled_user(
         email=email,
-        customer_name="Permanent Pass",
+        customer_name=customer_name or "Permanent Pass",
         invoice_numbers=["PERMANENT-PASS"],
         max_days_overdue=0,
-        action="Granted permanent library access",
+        action="Granted permanent library access" + (f" (Zoho Customer ID: {customer_id})" if customer_id else ""),
         status=result["status"],
         dry_run=dry_run
     )
@@ -347,6 +383,8 @@ def main():
     if args.grant_permanent:
         handle_grant_permanent(
             email=args.grant_permanent,
+            customer_name=args.name,
+            zoho_service=zoho_service,
             plex_service=plex_service,
             grant_service=grant_service,
             dry_run=args.dry_run
