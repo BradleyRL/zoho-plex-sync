@@ -217,8 +217,8 @@ class PlexService:
         dry_run: bool = False
     ) -> Dict[str, Any]:
         """
-        Grants access / shares libraries to a user in Plex.
-        Used when restoring access for paid invoices or temporary passes.
+        Grants access / shares libraries to a user in Plex as a standard Shared Friend (never Plex Home).
+        Used when restoring access for paid invoices, temporary passes, or permanent passes.
         """
         clean_email = email.strip().lower()
         if dry_run:
@@ -238,8 +238,18 @@ class PlexService:
             sections = server.library.sections()
             logger.info(f"Sharing {len(sections)} library section(s) with user '{clean_email}'...")
             
-            account.inviteFriend(user=clean_email, server=server, sections=sections)
-            logger.info(f"Successfully granted library access on Plex for '{clean_email}'.")
+            existing_user = self.find_user_by_email(clean_email)
+            if existing_user:
+                try:
+                    account.updateFriend(user=existing_user, server=server, sections=sections)
+                    logger.info(f"Successfully updated library access for existing Plex user '{clean_email}'.")
+                except Exception as e_up:
+                    logger.warning(f"Could not updateFriend for '{clean_email}', retrying inviteFriend: {e_up}")
+                    account.inviteFriend(user=clean_email, server=server, sections=sections, home=False)
+            else:
+                account.inviteFriend(user=clean_email, server=server, sections=sections, home=False)
+                logger.info(f"Successfully invited user '{clean_email}' as a shared Friend (home=False).")
+
             return {
                 "email": clean_email,
                 "status": "SUCCESS",
