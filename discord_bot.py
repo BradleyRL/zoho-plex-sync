@@ -6,6 +6,7 @@ Allows authorized Discord users to execute all CLI commands via slash commands:
  - /grant_temp <email> <name> [days] [dry_run]
  - /grant_invoice <invoice_num> [dry_run]
  - /grant_permanent <email> [dry_run]
+ - /revoke_access <email> [dry_run]
  - /list_inactive_plex
  - /show_invoices [threshold]
  - /sync [dry_run] [threshold]
@@ -303,6 +304,75 @@ async def grant_permanent(
     await interaction.followup.send(embed=embed)
 
 
+@bot.tree.command(name="revoke_access", description="Opción 5: Revocar los accesos de Plex a un usuario por correo electrónico")
+@app_commands.describe(
+    email="Correo electrónico del usuario de Plex",
+    dry_run="Simular sin modificar Plex"
+)
+async def revoke_access(
+    interaction: discord.Interaction,
+    email: str,
+    dry_run: bool = False
+):
+    unauth_embed = check_auth_or_embed(interaction)
+    if unauth_embed:
+        await interaction.response.send_message(embed=unauth_embed, ephemeral=True)
+        return
+
+    await interaction.response.defer(ephemeral=False)
+
+    def _execute():
+        missing = check_system_config()
+        if missing:
+            return {"error": f"Configuración incompleta: {', '.join(missing)}"}
+
+        plex_service = PlexService(cfg=config)
+        grant_service = GrantService()
+
+        grant_service.remove_pass(email)
+        result = plex_service.revoke_user_access(email=email, dry_run=dry_run)
+
+        log_disabled_user(
+            email=email,
+            customer_name="Manual Revocation",
+            invoice_numbers=["MANUAL-REVOKE"],
+            max_days_overdue=0,
+            action=result["action"],
+            status=result["status"],
+            dry_run=dry_run
+        )
+
+        return {
+            "email": email,
+            "status": result["status"],
+            "action": result["action"],
+            "dry_run": dry_run
+        }
+
+    data = await asyncio.to_thread(_execute)
+
+    if "error" in data:
+        embed = discord.Embed(
+            title="❌ Error al Revocar Acceso",
+            description=data["error"],
+            color=discord.Color.red()
+        )
+        await interaction.followup.send(embed=embed)
+        return
+
+    color = discord.Color.gold() if dry_run else discord.Color.red()
+    embed = discord.Embed(
+        title="🚫 Acceso a Plex Revocado",
+        color=color
+    )
+    embed.add_field(name="Email", value=data["email"], inline=True)
+    embed.add_field(name="Estado Plex", value=f"`{data['status']}`", inline=True)
+    embed.add_field(name="Acción Realizada", value=data["action"], inline=False)
+    embed.add_field(name="Modo", value="`[DRY-RUN]`" if dry_run else "`[LIVE]`", inline=True)
+
+    await interaction.followup.send(embed=embed)
+
+
 @bot.tree.command(name="list_inactive_plex", description="Opción 4: Listar usuarios de Plex sin factura recurrente ACTIVA en Zoho")
 async def list_inactive_plex(interaction: discord.Interaction):
     unauth_embed = check_auth_or_embed(interaction)
@@ -584,12 +654,40 @@ async def sync(
         }
 
         revoked_list = []
+        voided_count = 0
+        stopped_rec_count = 0
 
         for user_info in filtered_users:
             email = user_info["email"]
             customer_name = user_info["customer_name"]
             invoice_numbers = user_info["invoice_numbers"]
             max_days = user_info["max_days_overdue"]
+
+            # Process 20+ days overdue invoices (Void invoice with "No Renovó" + Stop recurring invoice)
+            details = user_info.get("overdue_invoices_details", [])
+            for inv_detail in details:
+                days_ov = inv_detail.get("days_overdue", 0)
+                inv_id = inv_detail.get("invoice_id")
+                inv_num = inv_detail.get("invoice_number")
+                cust_id = inv_detail.get("customer_id") or user_info.get("customer_id")
+
+                if days_ov >= 20:
+                    if dry_run:
+                        voided_count += 1
+                        stopped_rec_count += 1
+                    else:
+                        if inv_id:
+                            try:
+                                zoho_service.void_invoice(invoice_id=inv_id, reason="No Renovó")
+                                voided_count += 1
+                            except Exception:
+                                pass
+                        if cust_id:
+                            try:
+                                stopped_res = zoho_service.stop_recurring_invoices_for_customer(customer_id=cust_id)
+                                stopped_rec_count += len(stopped_res)
+                            except Exception:
+                                pass
 
             res = plex_service.revoke_user_access(email=email, dry_run=dry_run)
 
@@ -721,6 +819,11 @@ async def help_command(interaction: discord.Interaction):
     embed.add_field(
         name="♾️ `/grant_permanent <email> [dry_run]`",
         value="Otorga acceso permanente en Plex evitando revocaciones automáticas.",
+        inline=False
+    )
+    embed.add_field(
+        name="🚫 `/revoke_access <email> [dry_run]`",
+        value="Revoca inmediatamente el acceso de librerías en Plex para un correo determinado.",
         inline=False
     )
     embed.add_field(
