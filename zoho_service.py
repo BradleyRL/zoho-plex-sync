@@ -1,19 +1,25 @@
 from __future__ import annotations
 import requests
 from typing import List, Dict, Any, Optional, Set
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from logger_service import logger
 
 class ZohoBooksService:
     def __init__(self, cfg):
         self.cfg = cfg
         self.access_token: Optional[str] = None
+        self.token_expires_at: Optional[datetime] = None
+        self.contact_emails_cache: Dict[str, List[str]] = {}
 
-    def get_access_token(self) -> str:
+    def get_access_token(self, force_refresh: bool = False) -> str:
         """
         Retrieves a valid OAuth2 access token using the refresh token.
-        Always requests a fresh token to eliminate expiration edge cases.
+        Caches token in memory until 5 minutes before expiration to avoid hitting Zoho rate limits.
         """
+        now = datetime.now()
+        if not force_refresh and self.access_token and self.token_expires_at and now < self.token_expires_at:
+            return self.access_token
+
         url = f"{self.cfg.ZOHO_ACCOUNTS_URL}/oauth/v2/token"
         params = {
             "refresh_token": self.cfg.ZOHO_REFRESH_TOKEN,
@@ -35,10 +41,13 @@ class ZohoBooksService:
             raise RuntimeError(f"Access token missing in response: {data}")
 
         self.access_token = data["access_token"]
+        expires_in = data.get("expires_in", 3600)
+        # Store expiration timestamp with 5-minute safety buffer
+        self.token_expires_at = now + timedelta(seconds=max(expires_in - 300, 60))
         return self.access_token
 
-    def get_headers(self) -> Dict[str, str]:
-        token = self.get_access_token()
+    def get_headers(self, force_refresh_token: bool = False) -> Dict[str, str]:
+        token = self.get_access_token(force_refresh=force_refresh_token)
         return {
             "Authorization": f"Zoho-oauthtoken {token}",
             "Content-Type": "application/json"
@@ -288,7 +297,11 @@ class ZohoBooksService:
     def fetch_all_contact_emails(self, customer_id: str) -> List[str]:
         """
         Fetches primary and all secondary/additional contact person emails for a customer from Zoho Books.
+        Caches lookups in memory to prevent duplicate requests.
         """
+        if customer_id in self.contact_emails_cache:
+            return self.contact_emails_cache[customer_id]
+
         url = f"{self.cfg.ZOHO_BOOKS_API_URL}/contacts/{customer_id}"
         params = {"organization_id": self.cfg.ZOHO_ORGANIZATION_ID}
         emails = []
@@ -306,7 +319,11 @@ class ZohoBooksService:
                         emails.append(cp_email.strip().lower())
         except Exception as e:
             logger.warning(f"Could not fetch contact person details for customer {customer_id}: {e}")
-        return emails
+
+        # Deduplicate while preserving order
+        unique_emails = list(dict.fromkeys(emails))
+        self.contact_emails_cache[customer_id] = unique_emails
+        return unique_emails
 
     def get_active_recurring_invoice_emails(self) -> Set[str]:
         """
