@@ -44,14 +44,15 @@ class GrantService:
         email: str,
         customer_name: Optional[str] = None,
         customer_id: Optional[str] = None,
-        days: int = 2
+        days: int = 2,
+        reference_time: Optional[datetime] = None
     ) -> Dict[str, Any]:
         """
         Opción 1: Grants a temporary 2-day pass to an email address.
         If granted on Friday (weekday 4), extends pass to 3 days to cover the full weekend.
         """
         clean_email = email.strip().lower()
-        now = datetime.now()
+        now = reference_time or datetime.now()
 
         # Business logic rule: If today is Friday (weekday 4), grant 3 days instead of 2
         effective_days = days
@@ -76,6 +77,7 @@ class GrantService:
             "customer_id": customer_id or "",
             "created_at": created_at,
             "expires_at": expires_at,
+            "days": effective_days,
             "days_granted": effective_days
         }
 
@@ -122,11 +124,12 @@ class GrantService:
         ]
         self._save_data(data)
 
-    def is_temporary_active(self, email: str) -> bool:
+    def is_temporary_active(self, email: str, reference_time: Optional[datetime] = None) -> bool:
         """Checks if a user currently has an ACTIVE (unexpired) temporary pass."""
         clean_email = email.strip().lower()
         data = self._load_data()
-        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        now = reference_time or datetime.now()
+        now_str = now.strftime("%Y-%m-%d %H:%M:%S")
 
         for pass_info in data.get("temporary_passes", []):
             if pass_info.get("email", "").lower() == clean_email:
@@ -141,15 +144,27 @@ class GrantService:
         data = self._load_data()
         return clean_email in [p.lower() for p in data.get("permanent_passes", [])]
 
-    def get_expired_temporary_passes(self) -> List[Dict[str, Any]]:
-        """Returns all temporary passes that have passed their `expires_at` timestamp."""
+    def get_expired_temporary_passes(self, reference_time: Optional[datetime] = None) -> List[Dict[str, Any]]:
+        """Returns all temporary passes that have passed their `expires_at` timestamp and cleans them up."""
         data = self._load_data()
-        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        now = reference_time or datetime.now()
+        now_str = now.strftime("%Y-%m-%d %H:%M:%S")
         expired = []
+        remaining = []
 
         for pass_info in data.get("temporary_passes", []):
             expires_at = pass_info.get("expires_at", "")
             if expires_at <= now_str:
-                expired.append(pass_info)
+                expired.append({
+                    "email": pass_info.get("email"),
+                    "customer_name": pass_info.get("customer_name"),
+                    "customer_id": pass_info.get("customer_id")
+                })
+            else:
+                remaining.append(pass_info)
+
+        if expired:
+            data["temporary_passes"] = remaining
+            self._save_data(data)
 
         return expired

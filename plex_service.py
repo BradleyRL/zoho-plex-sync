@@ -23,6 +23,11 @@ class PlexService:
         
         if server_name:
             logger.info(f"Finding specified Plex server: '{server_name}'...")
+            if hasattr(account, "server") and callable(getattr(account, "server")):
+                try:
+                    return account.server(server_name)
+                except Exception:
+                    pass
             return account.resource(server_name).connect()
         else:
             # If server name is not explicitly set, use the first owned server resource
@@ -32,6 +37,23 @@ class PlexService:
             target_resource = resources[0]
             logger.info(f"Using default owned Plex server: '{target_resource.name}'...")
             return target_resource.connect()
+
+    def find_user_by_email(self, email: str):
+        """Finds a Plex user by email, username, or title."""
+        clean_email = email.strip().lower()
+        account = self.get_account()
+        for u in account.users():
+            user_email = getattr(u, "email", None)
+            user_username = getattr(u, "username", None)
+            user_title = getattr(u, "title", None)
+
+            if user_email and user_email.strip().lower() == clean_email:
+                return u
+            if user_username and user_username.strip().lower() == clean_email:
+                return u
+            if user_title and user_title.strip().lower() == clean_email:
+                return u
+        return None
 
     def get_all_shared_users(self) -> List[Dict[str, Any]]:
         """
@@ -74,29 +96,13 @@ class PlexService:
         target_libraries = self.cfg.PLEX_LIBRARIES
         
         account = self.get_account()
-        user_to_modify = None
-        
-        logger.info(f"Searching Plex account for user with email '{clean_email}'...")
-        for u in account.users():
-            user_email = getattr(u, "email", None)
-            user_username = getattr(u, "username", None)
-            user_title = getattr(u, "title", None)
-
-            if user_email and user_email.strip().lower() == clean_email:
-                user_to_modify = u
-                break
-            # Fallback match by username or title if email match fails
-            if user_username and user_username.strip().lower() == clean_email:
-                user_to_modify = u
-                break
-            if user_title and user_title.strip().lower() == clean_email:
-                user_to_modify = u
-                break
+        user_to_modify = self.find_user_by_email(clean_email)
 
         if not user_to_modify:
             logger.warning(f"User with email '{clean_email}' not found in Plex shared users list.")
             return {
                 "email": clean_email,
+                "found": False,
                 "status": "NOT_FOUND",
                 "message": f"User '{clean_email}' not found on Plex server.",
                 "action": "NONE"
@@ -109,36 +115,56 @@ class PlexService:
                 logger.info(f"[DRY-RUN] Would update library access for '{clean_email}', removing [{', '.join(target_libraries)}].")
                 return {
                     "email": clean_email,
+                    "found": True,
                     "status": "DRY_RUN",
                     "message": f"[DRY-RUN] Would remove libraries [{', '.join(target_libraries)}]",
-                    "action": action_desc
+                    "action": f"[DRY-RUN] {action_desc}"
                 }
             
             try:
-                # Fetch currently shared sections for this user
-                shared_sections = getattr(user_to_modify, "servers", [])
                 server_name = self.cfg.PLEX_SERVER_NAME
-                
-                # Get section titles user currently has access to
                 current_sections = []
-                for s in user_to_modify.servers:
-                    if not server_name or s.name == server_name:
-                        current_sections = getattr(s, "sections", [])
+                for s in getattr(user_to_modify, "servers", []):
+                    s_name = getattr(s, "name", None)
+                    if not server_name or not s_name or not isinstance(s_name, str) or s_name.lower() == server_name.lower():
+                        sec_attr = getattr(s, "sections", [])
+                        current_sections = sec_attr() if callable(sec_attr) else sec_attr
                         break
 
-                # Filter out target libraries
                 target_libs_lower = {lib.lower() for lib in target_libraries}
-                remaining_sections = [
-                    sec for sec in current_sections 
+                user_has_target_lib = any(getattr(sec, "title", "").lower() in target_libs_lower for sec in current_sections)
+
+                if current_sections and not user_has_target_lib:
+                    logger.info(f"User '{clean_email}' already has target libraries [{', '.join(target_libraries)}] disabled.")
+                    return {
+                        "email": clean_email,
+                        "found": True,
+                        "status": "ALREADY_DISABLED",
+                        "message": f"Libraries [{', '.join(target_libraries)}] already disabled for user.",
+                        "action": "ALREADY_DISABLED"
+                    }
+
+                server = self.get_server()
+                all_server_sections = []
+                try:
+                    all_server_sections = server.library.sections()
+                except Exception:
+                    all_server_sections = []
+
+                remaining_titles = [
+                    sec.title for sec in all_server_sections 
+                    if getattr(sec, "title", "").lower() not in target_libs_lower
+                ] if all_server_sections else [
+                    getattr(sec, "title", sec) for sec in current_sections 
                     if getattr(sec, "title", "").lower() not in target_libs_lower
                 ]
+                
+                account.updateFriend(user=user_to_modify, server=server, sections=remaining_titles)
 
-                # Update user access on server with remaining sections
-                server = self.get_server()
-                server.updateUnshare(user_to_modify, sections=remaining_sections)
-                logger.info(f"Successfully updated library access for user '{clean_email}'. Remaining sections: {[getattr(s, 'title', '') for s in remaining_sections]}")
+                logger.info(f"Successfully updated library access for user '{clean_email}'.")
                 return {
                     "email": clean_email,
+                    "found": True,
                     "status": "SUCCESS",
                     "message": f"Updated library access, removed [{', '.join(target_libraries)}]",
                     "action": action_desc
@@ -147,6 +173,7 @@ class PlexService:
                 logger.error(f"Failed to update library access for user '{clean_email}': {e}")
                 return {
                     "email": clean_email,
+                    "found": True,
                     "status": "FAILED",
                     "message": str(e),
                     "action": "ERROR"
@@ -158,17 +185,18 @@ class PlexService:
                 logger.info(f"[DRY-RUN] Would completely unshare user '{clean_email}' from Plex.")
                 return {
                     "email": clean_email,
+                    "found": True,
                     "status": "DRY_RUN",
                     "message": "[DRY-RUN] Would unshare user completely",
                     "action": action_desc
                 }
 
             try:
-                server = self.get_server()
                 account.removeFriend(user_to_modify)
                 logger.info(f"Successfully unshared/removed user '{clean_email}' from Plex.")
                 return {
                     "email": clean_email,
+                    "found": True,
                     "status": "SUCCESS",
                     "message": "Unshared user completely from Plex server.",
                     "action": action_desc
@@ -177,6 +205,7 @@ class PlexService:
                 logger.error(f"Failed to unshare user '{clean_email}' from Plex: {e}")
                 return {
                     "email": clean_email,
+                    "found": True,
                     "status": "FAILED",
                     "message": str(e),
                     "action": "ERROR"
