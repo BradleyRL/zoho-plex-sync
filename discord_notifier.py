@@ -1,3 +1,4 @@
+from __future__ import annotations
 import requests
 from typing import Optional, Dict, Any
 from config import config

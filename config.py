@@ -1,5 +1,7 @@
+from __future__ import annotations
 import os
 from pathlib import Path
+from typing import List
 from dotenv import load_dotenv
 
 # Ensure .env is loaded from the script directory even when executed via Cron
@@ -31,7 +33,7 @@ class Config:
     _PLEX_LIBRARIES_RAW: str = os.getenv("PLEX_LIBRARIES", "")
 
     @property
-    def PLEX_LIBRARIES(self) -> list[str]:
+    def PLEX_LIBRARIES(self) -> List[str]:
         if not self._PLEX_LIBRARIES_RAW or self._PLEX_LIBRARIES_RAW.strip().upper() == "ALL":
             return []
         return [lib.strip() for lib in self._PLEX_LIBRARIES_RAW.split(",") if lib.strip()]
@@ -44,7 +46,7 @@ class Config:
     DISCORD_WEBHOOK_URL: str = os.getenv("DISCORD_WEBHOOK_URL", "")
 
     @property
-    def DISCORD_ALLOWED_USERS(self) -> list[int]:
+    def DISCORD_ALLOWED_USERS(self) -> List[int]:
         if not self._DISCORD_ALLOWED_USERS_RAW:
             return []
         ids = []
@@ -61,7 +63,7 @@ class Config:
     LOG_DIR: Path = BASE_DIR / os.getenv("LOG_DIR", "logs")
 
     @classmethod
-    def validate(cls) -> list[str]:
+    def validate(cls) -> List[str]:
         """Validates that essential environment variables are set."""
         missing = []
         inst = cls()

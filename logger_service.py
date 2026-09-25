@@ -1,7 +1,9 @@
+from __future__ import annotations
 import logging
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import List
 from config import config
 
 def setup_logger(name: str = "overdue_plex_sync") -> logging.Logger:
@@ -43,7 +45,7 @@ logger = setup_logger()
 def log_disabled_user(
     email: str,
     customer_name: str,
-    invoice_numbers: list[str],
+    invoice_numbers: List[str],
     max_days_overdue: int,
     action: str,
     status: str,

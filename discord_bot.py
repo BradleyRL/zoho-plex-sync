@@ -14,9 +14,11 @@ Allows authorized Discord users to execute all CLI commands via slash commands:
  - /help
 """
 
+from __future__ import annotations
 import sys
 import asyncio
 import logging
+from typing import List, Optional
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -40,7 +42,7 @@ def is_authorized(user_id: int) -> bool:
         return True
     return user_id in allowed
 
-def check_auth_or_embed(interaction: discord.Interaction) -> discord.Embed | None:
+def check_auth_or_embed(interaction: discord.Interaction) -> Optional[discord.Embed]:
     """Returns an unauthorized embed if the user is not in DISCORD_ALLOWED_USERS."""
     if not is_authorized(interaction.user.id):
         embed = discord.Embed(
@@ -51,7 +53,7 @@ def check_auth_or_embed(interaction: discord.Interaction) -> discord.Embed | Non
         return embed
     return None
 
-def check_system_config() -> list[str]:
+def check_system_config() -> List[str]:
     """Validates core environment configuration."""
     return config.validate()
 
@@ -473,7 +475,7 @@ async def list_inactive_plex(interaction: discord.Interaction):
 
 @bot.tree.command(name="show_invoices", description="Debug: Mostrar facturas pendientes/vencidas en Zoho Books")
 @app_commands.describe(threshold="Días de mora para considerar vencida (por defecto desde env)")
-async def show_invoices(interaction: discord.Interaction, threshold: int | None = None):
+async def show_invoices(interaction: discord.Interaction, threshold: Optional[int] = None):
     unauth_embed = check_auth_or_embed(interaction)
     if unauth_embed:
         await interaction.response.send_message(embed=unauth_embed, ephemeral=True)
@@ -566,7 +568,7 @@ async def show_invoices(interaction: discord.Interaction, threshold: int | None 
 async def sync(
     interaction: discord.Interaction,
     dry_run: bool = False,
-    threshold: int | None = None
+    threshold: Optional[int] = None
 ):
     unauth_embed = check_auth_or_embed(interaction)
     if unauth_embed:

@@ -1,3 +1,4 @@
+from __future__ import annotations
 import json
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -14,141 +15,141 @@ class GrantService:
         self._ensure_file_exists()
 
     def _ensure_file_exists(self):
+        """Creates data directory and grants.json if they do not exist."""
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         if not self.file_path.exists():
-            initial_data = {
-                "temporary_passes": {},
-                "permanent_passes": {}
-            }
-            self._save_data(initial_data)
+            initial_data = {"temporary_passes": [], "permanent_passes": []}
+            with open(self.file_path, "w", encoding="utf-8") as f:
+                json.dump(initial_data, f, indent=2)
 
     def _load_data(self) -> Dict[str, Any]:
+        """Loads data from grants.json safely."""
         try:
             with open(self.file_path, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception as e:
-            logger.error(f"Failed to read grants data file {self.file_path}: {e}")
-            return {"temporary_passes": {}, "permanent_passes": {}}
+            logger.error(f"Error reading grants file '{self.file_path}': {e}")
+            return {"temporary_passes": [], "permanent_passes": []}
 
     def _save_data(self, data: Dict[str, Any]):
+        """Saves data back to grants.json safely."""
         try:
             with open(self.file_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
+                json.dump(data, f, indent=2)
         except Exception as e:
-            logger.error(f"Failed to write grants data file {self.file_path}: {e}")
+            logger.error(f"Error saving grants file '{self.file_path}': {e}")
 
     def add_temporary_pass(
         self,
         email: str,
-        customer_name: str = "",
-        customer_id: str = "",
-        days: int = 2,
-        reference_time: Optional[datetime] = None
+        customer_name: Optional[str] = None,
+        customer_id: Optional[str] = None,
+        days: int = 2
     ) -> Dict[str, Any]:
-        """Adds a temporary pass valid for `days` days (default: 2 days, or 3 days if granted on Friday)."""
-        email_clean = email.strip().lower()
-        now = reference_time if reference_time is not None else datetime.now()
-
-        # If granted on Friday (weekday == 4) and default days == 2, extend to 3 days to cover weekend
-        if now.weekday() == 4 and days == 2:
-            days = 3
-            logger.info(f"Granted on Friday: automatically extending temporary pass for '{email_clean}' to 3 days (covers full weekend).")
-
-        expires_at = now + timedelta(days=days)
-
-        data = self._load_data()
-        
-        # Remove from permanent if moving to temp
-        data["permanent_passes"].pop(email_clean, None)
-
-        pass_info = {
-            "granted_at": now.isoformat(),
-            "expires_at": expires_at.isoformat(),
-            "days": days,
-            "customer_name": customer_name,
-            "customer_id": customer_id
-        }
-        data["temporary_passes"][email_clean] = pass_info
-        self._save_data(data)
-
-        logger.info(f"Added temporary pass ({days} days) for '{email_clean}'. Expires at: {expires_at.strftime('%Y-%m-%d %H:%M:%S')}")
-        return pass_info
-
-    def add_permanent_pass(self, email: str) -> Dict[str, Any]:
-        """Adds a permanent pass for the given email."""
-        email_clean = email.strip().lower()
+        """
+        Opción 1: Grants a temporary 2-day pass to an email address.
+        If granted on Friday (weekday 4), extends pass to 3 days to cover the full weekend.
+        """
+        clean_email = email.strip().lower()
         now = datetime.now()
 
+        # Business logic rule: If today is Friday (weekday 4), grant 3 days instead of 2
+        effective_days = days
+        if days == 2 and now.weekday() == 4:
+            effective_days = 3
+            logger.info(f"Today is Friday! Automatically extending temporary pass for '{clean_email}' to {effective_days} days.")
+
+        expires_at = (now + timedelta(days=effective_days)).strftime("%Y-%m-%d %H:%M:%S")
+        created_at = now.strftime("%Y-%m-%d %H:%M:%S")
+
         data = self._load_data()
         
-        # Remove from temporary if upgrading to permanent
-        data["temporary_passes"].pop(email_clean, None)
+        # Remove any existing temporary pass for this email
+        data["temporary_passes"] = [
+            p for p in data.get("temporary_passes", []) 
+            if p.get("email", "").lower() != clean_email
+        ]
 
-        pass_info = {
-            "granted_at": now.isoformat()
+        new_pass = {
+            "email": clean_email,
+            "customer_name": customer_name or clean_email,
+            "customer_id": customer_id or "",
+            "created_at": created_at,
+            "expires_at": expires_at,
+            "days_granted": effective_days
         }
-        data["permanent_passes"][email_clean] = pass_info
-        self._save_data(data)
 
-        logger.info(f"Added permanent pass for '{email_clean}'.")
-        return pass_info
+        data["temporary_passes"].append(new_pass)
+        self._save_data(data)
+        
+        logger.info(f"Granted temporary pass to '{clean_email}' ({effective_days} days, expires: {expires_at}).")
+        return new_pass
+
+    def add_permanent_pass(self, email: str) -> Dict[str, Any]:
+        """
+        Opción 3: Grants a permanent pass to an email address.
+        """
+        clean_email = email.strip().lower()
+        created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        data = self._load_data()
+        
+        # Remove any existing temp pass for this email
+        data["temporary_passes"] = [
+            p for p in data.get("temporary_passes", []) 
+            if p.get("email", "").lower() != clean_email
+        ]
+
+        if clean_email not in [p.lower() for p in data.get("permanent_passes", [])]:
+            data["permanent_passes"].append(clean_email)
+            self._save_data(data)
+            logger.info(f"Added permanent pass for '{clean_email}'.")
+
+        return {"email": clean_email, "created_at": created_at}
 
     def remove_pass(self, email: str):
-        """Removes any temporary or permanent pass for the email."""
-        email_clean = email.strip().lower()
+        """Removes any temporary or permanent pass for an email."""
+        clean_email = email.strip().lower()
         data = self._load_data()
-        removed_temp = data["temporary_passes"].pop(email_clean, None)
-        removed_perm = data["permanent_passes"].pop(email_clean, None)
-        if removed_temp or removed_perm:
-            self._save_data(data)
+        
+        data["temporary_passes"] = [
+            p for p in data.get("temporary_passes", []) 
+            if p.get("email", "").lower() != clean_email
+        ]
+        data["permanent_passes"] = [
+            p for p in data.get("permanent_passes", []) 
+            if p.lower() != clean_email
+        ]
+        self._save_data(data)
+
+    def is_temporary_active(self, email: str) -> bool:
+        """Checks if a user currently has an ACTIVE (unexpired) temporary pass."""
+        clean_email = email.strip().lower()
+        data = self._load_data()
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        for pass_info in data.get("temporary_passes", []):
+            if pass_info.get("email", "").lower() == clean_email:
+                expires_at = pass_info.get("expires_at", "")
+                if expires_at > now_str:
+                    return True
+        return False
 
     def is_permanently_allowed(self, email: str) -> bool:
-        """Returns True if user has a permanent pass."""
-        email_clean = email.strip().lower()
+        """Checks if an email is registered on the permanent passes whitelist."""
+        clean_email = email.strip().lower()
         data = self._load_data()
-        return email_clean in data.get("permanent_passes", {})
+        return clean_email in [p.lower() for p in data.get("permanent_passes", [])]
 
-    def is_temporary_active(self, email: str, reference_time: Optional[datetime] = None) -> bool:
-        """Returns True if user has a valid active temporary pass."""
-        if reference_time is None:
-            reference_time = datetime.now()
-
-        email_clean = email.strip().lower()
+    def get_expired_temporary_passes(self) -> List[Dict[str, Any]]:
+        """Returns all temporary passes that have passed their `expires_at` timestamp."""
         data = self._load_data()
-        temp_info = data.get("temporary_passes", {}).get(email_clean)
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        expired = []
 
-        if not temp_info:
-            return False
+        for pass_info in data.get("temporary_passes", []):
+            expires_at = pass_info.get("expires_at", "")
+            if expires_at <= now_str:
+                expired.append(pass_info)
 
-        expires_at = datetime.fromisoformat(temp_info["expires_at"])
-        return reference_time < expires_at
-
-    def get_expired_temporary_passes(self, reference_time: Optional[datetime] = None) -> List[Dict[str, str]]:
-        """
-        Returns a list of dicts with email, customer_name, and customer_id of expired temporary passes.
-        Cleans up the expired passes from storage.
-        """
-        if reference_time is None:
-            reference_time = datetime.now()
-
-        data = self._load_data()
-        expired_passes = []
-        temp_passes = data.get("temporary_passes", {})
-        remaining_passes = {}
-
-        for email, pass_info in temp_passes.items():
-            expires_at = datetime.fromisoformat(pass_info["expires_at"])
-            if reference_time >= expires_at:
-                expired_passes.append({
-                    "email": email,
-                    "customer_name": pass_info.get("customer_name", ""),
-                    "customer_id": pass_info.get("customer_id", "")
-                })
-            else:
-                remaining_passes[email] = pass_info
-
-        if expired_passes:
-            data["temporary_passes"] = remaining_passes
-            self._save_data(data)
-
-        return expired_passes
+        return expired

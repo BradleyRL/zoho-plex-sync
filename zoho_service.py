@@ -1,5 +1,6 @@
+from __future__ import annotations
 import requests
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Set
 from datetime import datetime, date
 from logger_service import logger
 
@@ -169,7 +170,7 @@ class ZohoBooksService:
             invoice_num = inv.get("invoice_number", "UNKNOWN")
 
             # Collect primary + all secondary contact person emails for this customer
-            target_emails: set[str] = set()
+            target_emails: Set[str] = set()
             primary_email = inv.get("email") or inv.get("customer_email")
             if primary_email:
                 target_emails.add(primary_email.strip().lower())
@@ -284,7 +285,7 @@ class ZohoBooksService:
 
         return None
 
-    def fetch_all_contact_emails(self, customer_id: str) -> list[str]:
+    def fetch_all_contact_emails(self, customer_id: str) -> List[str]:
         """
         Fetches primary and all secondary/additional contact person emails for a customer from Zoho Books.
         """
@@ -307,7 +308,7 @@ class ZohoBooksService:
             logger.warning(f"Could not fetch contact person details for customer {customer_id}: {e}")
         return emails
 
-    def get_active_recurring_invoice_emails(self) -> set[str]:
+    def get_active_recurring_invoice_emails(self) -> Set[str]:
         """
         Fetches all customer emails (including primary and secondary contact persons)
         from Zoho Books that currently have an ACTIVE recurring invoice.
@@ -315,8 +316,8 @@ class ZohoBooksService:
         """
         url = f"{self.cfg.ZOHO_BOOKS_API_URL}/recurringinvoices"
         page = 1
-        active_emails: set[str] = set()
-        visited_customer_ids: set[str] = set()
+        active_emails: Set[str] = set()
+        visited_customer_ids: Set[str] = set()
 
         while True:
             params = {

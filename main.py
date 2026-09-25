@@ -10,6 +10,7 @@ and supports CLI options for:
  4. Revoking access directly by email (--revoke-access email)
 """
 
+from __future__ import annotations
 import sys
 import argparse
 from datetime import datetime
