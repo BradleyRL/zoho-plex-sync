@@ -199,7 +199,7 @@ class PlexService:
                     "found": True,
                     "status": "SUCCESS",
                     "message": "Unshared user completely from Plex server.",
-                    "action": action_desc
+                    "action": "Unshared user completely from Plex server"
                 }
             except Exception as e:
                 logger.error(f"Failed to unshare user '{clean_email}' from Plex: {e}")
@@ -245,10 +245,10 @@ class PlexService:
                     logger.info(f"Successfully updated library access for existing Plex user '{clean_email}'.")
                 except Exception as e_up:
                     logger.warning(f"Could not updateFriend for '{clean_email}', retrying inviteFriend: {e_up}")
-                    account.inviteFriend(user=clean_email, server=server, sections=sections, home=False)
+                    account.inviteFriend(user=clean_email, server=server, sections=sections)
             else:
-                account.inviteFriend(user=clean_email, server=server, sections=sections, home=False)
-                logger.info(f"Successfully invited user '{clean_email}' as a shared Friend (home=False).")
+                account.inviteFriend(user=clean_email, server=server, sections=sections)
+                logger.info(f"Successfully invited user '{clean_email}' as a shared Friend.")
 
             return {
                 "email": clean_email,
