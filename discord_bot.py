@@ -247,7 +247,7 @@ async def grant_invoice(
     await interaction.followup.send(embed=embed)
 
 
-@bot.tree.command(name="grant_permanent", description="Opción 3: Otorgar acceso permanente a un correo electrónico (opcionalmente creando cliente y factura en Zoho)")
+@bot.tree.command(name="grant_permanent", description="Opción 3: Otorgar acceso permanente (opcionalmente crea cliente/factura Zoho)")
 @app_commands.describe(
     email="Correo electrónico del usuario de Plex",
     name="Nombre del cliente para crear en Zoho Books y su factura recurrente (opcional)",
