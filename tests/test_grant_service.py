@@ -71,3 +71,22 @@ def test_upgrade_temp_to_permanent(tmp_path):
     service.add_permanent_pass("user@example.com")
     assert service.is_permanently_allowed("user@example.com") is True
     assert service.is_temporary_active("user@example.com") is False
+
+def test_legacy_string_entry_handling(tmp_path):
+    import json
+    data_file = tmp_path / "grants.json"
+    
+    # Save grants.json containing string entries instead of dicts
+    legacy_data = {
+        "temporary_passes": ["legacy_temp@example.com"],
+        "permanent_passes": ["legacy_perm@example.com"]
+    }
+    with open(data_file, "w", encoding="utf-8") as f:
+        json.dump(legacy_data, f)
+
+    service = GrantService(file_path=data_file)
+    assert service.is_permanently_allowed("legacy_perm@example.com") is True
+    
+    # Adding permanent pass should not crash when encountering string in temporary_passes
+    service.add_permanent_pass("legacy_temp@example.com")
+    assert service.is_permanently_allowed("legacy_temp@example.com") is True

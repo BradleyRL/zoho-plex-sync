@@ -39,6 +39,20 @@ class GrantService:
         except Exception as e:
             logger.error(f"Error saving grants file '{self.file_path}': {e}")
 
+    @staticmethod
+    def _get_pass_email(p: Any) -> str:
+        if isinstance(p, dict):
+            return str(p.get("email", "")).strip().lower()
+        elif isinstance(p, str):
+            return p.strip().lower()
+        return ""
+
+    @staticmethod
+    def _get_pass_expires_at(p: Any) -> str:
+        if isinstance(p, dict):
+            return str(p.get("expires_at", ""))
+        return ""
+
     def add_temporary_pass(
         self,
         email: str,
@@ -68,7 +82,7 @@ class GrantService:
         # Remove any existing temporary pass for this email
         data["temporary_passes"] = [
             p for p in data.get("temporary_passes", []) 
-            if p.get("email", "").lower() != clean_email
+            if self._get_pass_email(p) != clean_email
         ]
 
         new_pass = {
@@ -99,10 +113,11 @@ class GrantService:
         # Remove any existing temp pass for this email
         data["temporary_passes"] = [
             p for p in data.get("temporary_passes", []) 
-            if p.get("email", "").lower() != clean_email
+            if self._get_pass_email(p) != clean_email
         ]
 
-        if clean_email not in [p.lower() for p in data.get("permanent_passes", [])]:
+        existing_perm = [self._get_pass_email(p) for p in data.get("permanent_passes", [])]
+        if clean_email not in existing_perm:
             data["permanent_passes"].append(clean_email)
             self._save_data(data)
             logger.info(f"Added permanent pass for '{clean_email}'.")
@@ -116,11 +131,11 @@ class GrantService:
         
         data["temporary_passes"] = [
             p for p in data.get("temporary_passes", []) 
-            if p.get("email", "").lower() != clean_email
+            if self._get_pass_email(p) != clean_email
         ]
         data["permanent_passes"] = [
             p for p in data.get("permanent_passes", []) 
-            if p.lower() != clean_email
+            if self._get_pass_email(p) != clean_email
         ]
         self._save_data(data)
 
@@ -132,9 +147,9 @@ class GrantService:
         now_str = now.strftime("%Y-%m-%d %H:%M:%S")
 
         for pass_info in data.get("temporary_passes", []):
-            if pass_info.get("email", "").lower() == clean_email:
-                expires_at = pass_info.get("expires_at", "")
-                if expires_at > now_str:
+            if self._get_pass_email(pass_info) == clean_email:
+                expires_at = self._get_pass_expires_at(pass_info)
+                if expires_at and expires_at > now_str:
                     return True
         return False
 
@@ -142,7 +157,8 @@ class GrantService:
         """Checks if an email is registered on the permanent passes whitelist."""
         clean_email = email.strip().lower()
         data = self._load_data()
-        return clean_email in [p.lower() for p in data.get("permanent_passes", [])]
+        existing_perm = [self._get_pass_email(p) for p in data.get("permanent_passes", [])]
+        return clean_email in existing_perm
 
     def get_expired_temporary_passes(self, reference_time: Optional[datetime] = None) -> List[Dict[str, Any]]:
         """Returns all temporary passes that have passed their `expires_at` timestamp and cleans them up."""
@@ -153,13 +169,15 @@ class GrantService:
         remaining = []
 
         for pass_info in data.get("temporary_passes", []):
-            expires_at = pass_info.get("expires_at", "")
-            if expires_at <= now_str:
-                expired.append({
-                    "email": pass_info.get("email"),
-                    "customer_name": pass_info.get("customer_name"),
-                    "customer_id": pass_info.get("customer_id")
-                })
+            email = self._get_pass_email(pass_info)
+            expires_at = self._get_pass_expires_at(pass_info)
+            if not expires_at or expires_at <= now_str:
+                if email:
+                    expired.append({
+                        "email": email,
+                        "customer_name": pass_info.get("customer_name") if isinstance(pass_info, dict) else email,
+                        "customer_id": pass_info.get("customer_id") if isinstance(pass_info, dict) else ""
+                    })
             else:
                 remaining.append(pass_info)
 
