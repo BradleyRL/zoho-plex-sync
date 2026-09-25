@@ -90,3 +90,23 @@ def test_legacy_string_entry_handling(tmp_path):
     # Adding permanent pass should not crash when encountering string in temporary_passes
     service.add_permanent_pass("legacy_temp@example.com")
     assert service.is_permanently_allowed("legacy_temp@example.com") is True
+
+def test_legacy_dict_permanent_passes(tmp_path):
+    import json
+    data_file = tmp_path / "grants.json"
+    
+    # Save grants.json containing dict for permanent_passes instead of list
+    legacy_data = {
+        "temporary_passes": {},
+        "permanent_passes": {"dict_perm@example.com": "2026-09-25"}
+    }
+    with open(data_file, "w", encoding="utf-8") as f:
+        json.dump(legacy_data, f)
+
+    service = GrantService(file_path=data_file)
+    assert service.is_permanently_allowed("dict_perm@example.com") is True
+
+    # Adding another permanent pass should convert dict to list and append cleanly without crashing
+    service.add_permanent_pass("new_perm@example.com")
+    assert service.is_permanently_allowed("new_perm@example.com") is True
+    assert service.is_permanently_allowed("dict_perm@example.com") is True

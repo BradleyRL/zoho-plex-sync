@@ -23,10 +23,37 @@ class GrantService:
                 json.dump(initial_data, f, indent=2)
 
     def _load_data(self) -> Dict[str, Any]:
-        """Loads data from grants.json safely."""
+        """Loads data from grants.json safely, normalizing temporary_passes & permanent_passes into lists."""
         try:
             with open(self.file_path, "r", encoding="utf-8") as f:
-                return json.load(f)
+                data = json.load(f)
+                if not isinstance(data, dict):
+                    data = {}
+
+                temp_passes = data.get("temporary_passes")
+                if isinstance(temp_passes, list):
+                    pass
+                elif isinstance(temp_passes, dict):
+                    # Convert dict keys or values to list format
+                    converted_temp = []
+                    for k, v in temp_passes.items():
+                        if isinstance(v, dict):
+                            converted_temp.append(v)
+                        else:
+                            converted_temp.append({"email": str(k).strip().lower()})
+                    data["temporary_passes"] = converted_temp
+                else:
+                    data["temporary_passes"] = []
+
+                perm_passes = data.get("permanent_passes")
+                if isinstance(perm_passes, list):
+                    pass
+                elif isinstance(perm_passes, dict):
+                    data["permanent_passes"] = [str(k).strip().lower() for k in perm_passes.keys()]
+                else:
+                    data["permanent_passes"] = []
+
+                return data
         except Exception as e:
             logger.error(f"Error reading grants file '{self.file_path}': {e}")
             return {"temporary_passes": [], "permanent_passes": []}
