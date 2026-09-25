@@ -18,6 +18,7 @@ from __future__ import annotations
 import sys
 import asyncio
 import logging
+import functools
 from typing import List, Optional
 import discord
 from discord import app_commands
@@ -29,6 +30,13 @@ from logger_service import logger, log_disabled_user
 from zoho_service import ZohoBooksService
 from plex_service import PlexService
 from grant_service import GrantService
+
+async def run_in_thread(func, *args, **kwargs):
+    """Backport of asyncio.to_thread for Python < 3.9."""
+    if hasattr(asyncio, "to_thread"):
+        return await asyncio.to_thread(func, *args, **kwargs)
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, functools.partial(func, *args, **kwargs))
 
 # Setup Discord Client & Command Tree
 intents = discord.Intents.default()
@@ -132,7 +140,7 @@ async def grant_temp(
             "dry_run": dry_run
         }
 
-    data = await asyncio.to_thread(_execute)
+    data = await run_in_thread(_execute)
 
     if "error" in data:
         embed = discord.Embed(
@@ -214,7 +222,7 @@ async def grant_invoice(
             "dry_run": dry_run
         }
 
-    data = await asyncio.to_thread(_execute)
+    data = await run_in_thread(_execute)
 
     if "error" in data:
         embed = discord.Embed(
@@ -283,7 +291,7 @@ async def grant_permanent(
             "dry_run": dry_run
         }
 
-    data = await asyncio.to_thread(_execute)
+    data = await run_in_thread(_execute)
 
     if "error" in data:
         embed = discord.Embed(
@@ -351,7 +359,7 @@ async def revoke_access(
             "dry_run": dry_run
         }
 
-    data = await asyncio.to_thread(_execute)
+    data = await run_in_thread(_execute)
 
     if "error" in data:
         embed = discord.Embed(
@@ -436,7 +444,7 @@ async def list_inactive_plex(interaction: discord.Interaction):
 
         return {"users": inactive_plex_users}
 
-    data = await asyncio.to_thread(_execute)
+    data = await run_in_thread(_execute)
 
     if "error" in data:
         embed = discord.Embed(
@@ -523,7 +531,7 @@ async def show_invoices(interaction: discord.Interaction, threshold: Optional[in
 
         return {"invoices": items}
 
-    data = await asyncio.to_thread(_execute)
+    data = await run_in_thread(_execute)
 
     if "error" in data:
         embed = discord.Embed(
@@ -728,7 +736,7 @@ async def sync(
             "revoked_list": revoked_list
         }
 
-    data = await asyncio.to_thread(_execute)
+    data = await run_in_thread(_execute)
 
     if "error" in data:
         embed = discord.Embed(
