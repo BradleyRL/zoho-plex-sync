@@ -116,3 +116,74 @@ def test_revoke_user_access_already_disabled():
     assert res["found"] is True
     assert res["status"] == "ALREADY_DISABLED"
     mock_account.updateFriend.assert_not_called()
+
+def test_grant_user_access_respects_plex_libraries():
+    mock_cfg = MagicMock()
+    mock_cfg.PLEX_LIBRARIES = ["Movies", "Series"]
+    mock_cfg.PLEX_SERVER_NAME = ""
+
+    mock_account = MagicMock()
+    mock_server = MagicMock()
+    mock_account.users.return_value = []
+    
+    if hasattr(mock_account, "server") and callable(getattr(mock_account, "server")):
+        mock_account.server.return_value = mock_server
+    
+    resource = MagicMock()
+    resource.provides = "server"
+    resource.owned = True
+    resource.connect.return_value = mock_server
+    mock_account.resources.return_value = [resource]
+
+    sec1 = MagicMock()
+    sec1.title = "Movies"
+    sec2 = MagicMock()
+    sec2.title = "Music"
+    sec3 = MagicMock()
+    sec3.title = "Series"
+
+    mock_server.library.sections.return_value = [sec1, sec2, sec3]
+
+    service = PlexService(cfg=mock_cfg, account=mock_account)
+    res = service.grant_user_access("newuser@example.com", dry_run=False)
+
+    assert res["status"] == "SUCCESS"
+    assert res["message"] == "Granted access to 2 library sections."
+    mock_account.inviteFriend.assert_called_once_with(
+        user="newuser@example.com",
+        server=mock_server,
+        sections=[sec1, sec3]
+    )
+
+def test_grant_user_access_all_libraries():
+    mock_cfg = MagicMock()
+    mock_cfg.PLEX_LIBRARIES = [] # ALL
+    mock_cfg.PLEX_SERVER_NAME = ""
+
+    mock_account = MagicMock()
+    mock_server = MagicMock()
+    mock_account.users.return_value = []
+    
+    resource = MagicMock()
+    resource.provides = "server"
+    resource.owned = True
+    resource.connect.return_value = mock_server
+    mock_account.resources.return_value = [resource]
+
+    sec1 = MagicMock()
+    sec1.title = "Movies"
+    sec2 = MagicMock()
+    sec2.title = "Music"
+
+    mock_server.library.sections.return_value = [sec1, sec2]
+
+    service = PlexService(cfg=mock_cfg, account=mock_account)
+    res = service.grant_user_access("newuser@example.com", dry_run=False)
+
+    assert res["status"] == "SUCCESS"
+    assert res["message"] == "Granted access to 2 library sections."
+    mock_account.inviteFriend.assert_called_once_with(
+        user="newuser@example.com",
+        server=mock_server,
+        sections=[sec1, sec2]
+    )

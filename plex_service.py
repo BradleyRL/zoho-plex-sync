@@ -235,8 +235,22 @@ class PlexService:
             account = self.get_account()
             
             # Fetch available library sections on server
-            sections = server.library.sections()
-            logger.info(f"Sharing {len(sections)} library section(s) with user '{clean_email}'...")
+            all_sections = server.library.sections()
+            target_libraries = self.cfg.PLEX_LIBRARIES
+
+            if target_libraries:
+                target_libs_lower = {lib.lower() for lib in target_libraries}
+                sections = [
+                    sec for sec in all_sections 
+                    if getattr(sec, "title", "").lower() in target_libs_lower
+                ]
+                logger.info(
+                    f"Sharing {len(sections)} of {len(all_sections)} section(s) "
+                    f"matching PLEX_LIBRARIES [{', '.join(target_libraries)}] with user '{clean_email}'..."
+                )
+            else:
+                sections = all_sections
+                logger.info(f"Sharing all {len(sections)} library section(s) with user '{clean_email}'...")
             
             existing_user = self.find_user_by_email(clean_email)
             if existing_user:
