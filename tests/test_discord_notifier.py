@@ -69,3 +69,37 @@ def test_send_discord_sync_summary_no_token():
 
         res = send_discord_sync_summary({})
         assert res is False
+
+def test_send_discord_sync_summary_with_modified_users():
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+
+    summary_data = {
+        "dry_run": False,
+        "threshold": 3,
+        "summary": {"total": 1, "success": 1, "already_disabled": 0, "not_found": 0, "failed": 0},
+        "modified_users": [
+            {
+                "email": "user@example.com",
+                "customer": "Test Customer",
+                "status": "SUCCESS",
+                "action": "Removed libraries [Plex - TV shows]"
+            }
+        ]
+    }
+
+    with patch("discord_notifier.config") as mock_cfg:
+        mock_cfg.DISCORD_WEBHOOK_URL = ""
+        mock_cfg.DISCORD_BOT_TOKEN = "test_token"
+        mock_cfg.DISCORD_NOTIFICATION_CHANNEL_ID = "1552699204772696267"
+        mock_cfg.OVERDUE_DAYS_THRESHOLD = 3
+
+        with patch("requests.post", return_value=mock_resp) as mock_post:
+            res = send_discord_sync_summary(summary_data)
+            assert res is True
+            embed = mock_post.call_args[1]["json"]["embeds"][0]
+            fields = embed["fields"]
+            mod_field = next((f for f in fields if f["name"] == "Usuarios Modificados / Procesados"), None)
+            assert mod_field is not None
+            assert "user@example.com" in mod_field["value"]
+            assert "Removed libraries [Plex - TV shows]" in mod_field["value"]

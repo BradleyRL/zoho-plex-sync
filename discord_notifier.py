@@ -48,6 +48,28 @@ def send_discord_sync_summary(
             "inline": False
         })
 
+    modified_users = summary_data.get("modified_users") or summary_data.get("revoked_list", [])
+    if modified_users:
+        mod_lines = []
+        for u in modified_users[:15]:
+            cust_str = f" ({u['customer']})" if u.get("customer") else ""
+            status_str = u.get("status", "N/A")
+            action_str = u.get("action", "N/A")
+            mod_lines.append(f"• `{u['email']}`{cust_str} - Status: `{status_str}` | **Acción:** {action_str}")
+
+        value_text = "\n".join(mod_lines)
+        if len(modified_users) > 15:
+            value_text += f"\n*... y {len(modified_users) - 15} usuarios más*"
+
+        if len(value_text) > 1024:
+            value_text = value_text[:1000] + "\n*... (lista truncada)*"
+
+        fields.append({
+            "name": "Usuarios Modificados / Procesados",
+            "value": value_text,
+            "inline": False
+        })
+
     embed = {
         "title": "🔄 Sincronización Diaria Zoho Books -> Plex",
         "description": "Resultado del proceso de sincronización ejecutado:",

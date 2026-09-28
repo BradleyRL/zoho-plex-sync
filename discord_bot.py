@@ -766,7 +766,8 @@ async def sync(
                 "email": email,
                 "customer": customer_name,
                 "invoices": ", ".join(invoice_numbers),
-                "status": st
+                "status": st,
+                "action": res.get("action", "N/A")
             })
 
         return {
@@ -810,6 +811,24 @@ async def sync(
     if data["expired_processed"]:
         exp_text = "\n".join([f"• `{p['email']}` - Status: `{p['status']}`" for p in data["expired_processed"][:5]])
         embed.add_field(name="Pases Temporales Procesados", value=exp_text, inline=False)
+
+    revoked_list = data.get("revoked_list", [])
+    if revoked_list:
+        mod_lines = []
+        for u in revoked_list[:15]:
+            cust_str = f" ({u['customer']})" if u.get("customer") else ""
+            status_str = u.get("status", "N/A")
+            action_str = u.get("action", "N/A")
+            mod_lines.append(f"• `{u['email']}`{cust_str} - Status: `{status_str}` | **Acción:** {action_str}")
+
+        val_text = "\n".join(mod_lines)
+        if len(revoked_list) > 15:
+            val_text += f"\n*... y {len(revoked_list) - 15} usuarios más*"
+
+        if len(val_text) > 1024:
+            val_text = val_text[:1000] + "\n*... (lista truncada)*"
+
+        embed.add_field(name="Usuarios Modificados / Procesados", value=val_text, inline=False)
 
     await interaction.followup.send(embed=embed)
 

@@ -494,6 +494,7 @@ def main():
     already_disabled_count = 0
     not_found_count = 0
     failed_count = 0
+    modified_users = []
 
     if filtered_users_to_disable:
         logger.info(f"Found {len(filtered_users_to_disable)} user(s) with overdue invoices > {threshold} days to process.")
@@ -547,6 +548,13 @@ def main():
                 not_found_count += 1
             else:
                 failed_count += 1
+
+            modified_users.append({
+                "email": email,
+                "customer": customer_name,
+                "status": result["status"],
+                "action": result["action"]
+            })
     else:
         logger.info("No overdue users requiring access revocation today. Sync complete.")
 
@@ -569,7 +577,8 @@ def main():
             "already_disabled": already_disabled_count,
             "not_found": not_found_count,
             "failed": failed_count
-        }
+        },
+        "modified_users": modified_users
     })
 
 if __name__ == "__main__":
