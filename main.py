@@ -199,7 +199,8 @@ def handle_grant_permanent(
                     item_id="5251269000000090022",
                     quantity=1,
                     never_expires=True,
-                    payment_terms=0
+                    payment_terms=0,
+                    customer_email=email
                 )
             except Exception as e:
                 logger.error(f"Failed to create recurring invoice in Zoho Books: {e}")
@@ -446,7 +447,8 @@ def main():
                             item_id="5251269000000090022",
                             quantity=1,
                             never_expires=True,
-                            payment_terms=0
+                            payment_terms=0,
+                            customer_email=expired_email
                         )
                         rec_inv_status = "Creada exitosamente"
                         logger.info(f"Created Recurring Invoice in Zoho Books for '{customer_name}'.")

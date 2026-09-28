@@ -298,7 +298,8 @@ async def grant_permanent(
                         item_id="5251269000000090022",
                         quantity=1,
                         never_expires=True,
-                        payment_terms=0
+                        payment_terms=0,
+                        customer_email=email
                     )
                     rec_inv_status = "Creada exitosamente en Zoho Books"
                 except Exception as e:
@@ -661,7 +662,8 @@ async def sync(
                                 item_id="5251269000000090022",
                                 quantity=1,
                                 never_expires=True,
-                                payment_terms=0
+                                payment_terms=0,
+                                customer_email=expired_email
                             )
                             rec_inv_status = "Creada exitosamente"
                         except Exception as e:
@@ -796,77 +798,62 @@ async def sync(
     )
     embed.add_field(name="Modo", value="`[DRY-RUN]`" if dry_run else "`[LIVE]`", inline=True)
     embed.add_field(name="Umbral de Vencimiento", value=f"> {data['threshold']} días", inline=True)
-    embed.add_field(name="Pases Temporales Expirados", value=str(len(data["expired_processed"])), inline=True)
-
-    summary = data["summary"]
-    summary_text = (
-        f"**Total a procesar:** {summary['total']}\n"
-        f"**Revocados / Actualizados:** {summary['success']}\n"
-        f"**Ya Deshabilitados:** {summary['already_disabled']}\n"
-        f"**No Encontrados en Plex:** {summary['not_found']}\n"
-        f"**Fallidos:** {summary['failed']}"
+    embed.add_field(
+        name="Resumen de Vencidos",
+        value=(
+            f"• Total en mora: **{data['summary']['total']}**\n"
+            f"• Accesos Revocados: **{data['summary']['success']}**\n"
+            f"• Ya Deshabilitados: **{data['summary']['already_disabled']}**\n"
+            f"• No Encontrados en Plex: **{data['summary']['not_found']}**\n"
+            f"• Errores: **{data['summary']['failed']}**"
+        ),
+        inline=False
     )
-    embed.add_field(name="Resumen de Ejecución", value=summary_text, inline=False)
 
-    if data["expired_processed"]:
-        exp_text = "\n".join([f"• `{p['email']}` ({p.get('customer', '')}) - Status: `{p['status']}` | Factura: `{p.get('rec_invoice', 'N/A')}`" for p in data["expired_processed"][:10]])
-        embed.add_field(name="🎟️ Pases Temporales Expirados Procesados", value=exp_text, inline=False)
-    else:
-        embed.add_field(name="🎟️ Pases Temporales Expirados", value="Ningún pase temporal expiró hoy.", inline=False)
+    if data.get("expired_processed"):
+        exp_lines = []
+        for exp in data["expired_processed"]:
+            exp_lines.append(f"• **{exp['customer']}** (`{exp['email']}`): Factura Recurrente `{exp['rec_invoice']}` | Plex `{exp['status']}`")
+        embed.add_field(name="🎟️ Pases Temporales Expirados Procesados", value="\n".join(exp_lines[:10]), inline=False)
 
-    revoked_list = data.get("revoked_list", [])
-    if revoked_list:
-        mod_lines = []
-        for u in revoked_list[:15]:
-            cust_str = f" ({u['customer']})" if u.get("customer") else ""
-            status_str = u.get("status", "N/A")
-            action_str = u.get("action", "N/A")
-            mod_lines.append(f"• `{u['email']}`{cust_str} - Status: `{status_str}` | **Acción:** {action_str}")
-
-        val_text = "\n".join(mod_lines)
-        if len(revoked_list) > 15:
-            val_text += f"\n*... y {len(revoked_list) - 15} usuarios más*"
-
-        if len(val_text) > 1024:
-            val_text = val_text[:1000] + "\n*... (lista truncada)*"
-
-        embed.add_field(name="Usuarios Modificados / Procesados", value=val_text, inline=False)
+    if data.get("revoked_list"):
+        rev_lines = []
+        for r in data["revoked_list"][:15]:
+            rev_lines.append(f"• **{r['customer']}** (`{r['email']}`): Facturas `{r['invoices']}` | `{r['status']}` - {r['action']}")
+        embed.add_field(name="👥 Usuarios Modificados (Facturas Vencidas)", value="\n".join(rev_lines), inline=False)
 
     await interaction.followup.send(embed=embed)
 
 
-@bot.tree.command(name="check_config", description="Validar la configuración y variables de entorno del sistema")
+@bot.tree.command(name="check_config", description="Validar la configuración del sistema (.env)")
 async def check_config(interaction: discord.Interaction):
     unauth_embed = check_auth_or_embed(interaction)
     if unauth_embed:
         await interaction.response.send_message(embed=unauth_embed, ephemeral=True)
         return
 
-    await interaction.response.defer(ephemeral=False)
-
     missing = check_system_config()
 
     if missing:
         embed = discord.Embed(
-            title="⚙️ Estado de la Configuración: INCOMPLETA",
-            description=f"Faltan las siguientes variables en `.env`:\n• " + "\n• ".join(missing),
-            color=discord.Color.red()
+            title="⚠️ Configuración Incompleta",
+            description=f"Faltan las siguientes variables requeridas en el archivo `.env`:\n• " + "\n• ".join(missing),
+            color=discord.Color.orange()
         )
     else:
         embed = discord.Embed(
-            title="⚙️ Estado de la Configuración: VÁLIDA",
-            description="Todas las variables requeridas están correctamente configuradas.",
+            title="✅ Configuración Válida",
+            description="Todas las variables de entorno requeridas están correctamente configuradas.",
             color=discord.Color.green()
         )
-        embed.add_field(name="Plex Server", value=f"`{config.PLEX_SERVER_NAME}`" or "No set", inline=True)
-        embed.add_field(name="Zoho Domain", value=f"`{config.ZOHO_DOMAIN}`", inline=True)
-        embed.add_field(name="Umbral Mora", value=f"`{config.OVERDUE_DAYS_THRESHOLD}` días", inline=True)
-        embed.add_field(name="Usuarios Autorizados Discord", value=f"`{len(config.DISCORD_ALLOWED_USERS)}` registrados", inline=False)
+        embed.add_field(name="Umbral de Vencimiento", value=f"> {config.OVERDUE_DAYS_THRESHOLD} días", inline=True)
+        embed.add_field(name="Servidor Plex", value=config.PLEX_SERVER_NAME or "(Por defecto)", inline=True)
+        embed.add_field(name="Librerías Objetivo", value=", ".join(config.PLEX_LIBRARIES) if config.PLEX_LIBRARIES else "TODAS", inline=True)
 
-    await interaction.followup.send(embed=embed)
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
-@bot.tree.command(name="help", description="Mostrar menú de ayuda con todos los comandos disponibles")
+@bot.tree.command(name="help", description="Muestra la ayuda y lista de comandos disponibles")
 async def help_command(interaction: discord.Interaction):
     unauth_embed = check_auth_or_embed(interaction)
     if unauth_embed:
@@ -874,80 +861,75 @@ async def help_command(interaction: discord.Interaction):
         return
 
     embed = discord.Embed(
-        title="🤖 Bot de Gestión Zoho Books <-> Plex",
-        description="Comandos disponibles para administrar accesos de Plex y sincronización con Zoho Books:",
-        color=discord.Color.purple()
+        title="ℹ️ Ayuda del Bot de Sincronización Zoho Books <-> Plex",
+        description="A continuación se detallan los comandos de barra diagonal disponibles:",
+        color=discord.Color.blue()
     )
     embed.add_field(
-        name="🎟️ `/grant_temp <email> <name> [days] [dry_run]`",
-        value="Otorga acceso temporal N días, crea cliente en Zoho (GTQ) y guarda ID para facturación recurrente futura.",
+        name="/grant_temp `email` `name` `[days]` `[dry_run]`",
+        value="Otorgar pase temporal por N días y crear cliente en Zoho Books.",
         inline=False
     )
     embed.add_field(
-        name="📄 `/grant_invoice <invoice_num> [dry_run]`",
-        value="Otorga acceso a usuario buscando por número de factura recurrente de Zoho.",
+        name="/grant_invoice `invoice_num` `[dry_run]`",
+        value="Restablecer acceso buscando al cliente por # de factura recurrente en Zoho.",
         inline=False
     )
     embed.add_field(
-        name="♾️ `/grant_permanent <email> [name] [dry_run]`",
-        value="Otorga acceso permanente en Plex. Si se proporciona `name`, también crea el cliente en Zoho Books (GTQ) y su factura recurrente.",
+        name="/grant_permanent `email` `[name]` `[dry_run]`",
+        value="Otorgar acceso permanente (opcionalmente crea cliente y factura recurrente en Zoho).",
         inline=False
     )
     embed.add_field(
-        name="🚫 `/revoke_access <email> [dry_run]`",
-        value="Revoca inmediatamente el acceso de librerías en Plex para un correo determinado.",
+        name="/revoke_access `email` `[dry_run]`",
+        value="Revocar accesos a Plex de forma manual e inmediata para un correo.",
         inline=False
     )
     embed.add_field(
-        name="⚠️ `/list_inactive_plex`",
-        value="Muestra usuarios de Plex que NO poseen una factura recurrente activa en Zoho Books.",
+        name="/list_inactive_plex",
+        value="Listar usuarios de Plex que no tienen factura recurrente activa en Zoho.",
         inline=False
     )
     embed.add_field(
-        name="📊 `/show_invoices [threshold]`",
-        value="Muestra todas las facturas pendientes/vencidas en Zoho Books.",
+        name="/show_invoices `[threshold]`",
+        value="Mostrar facturas pendientes/vencidas registradas en Zoho Books.",
         inline=False
     )
     embed.add_field(
-        name="🔄 `/sync [dry_run] [threshold]`",
-        value="Ejecuta la sincronización diaria completa (vencimientos, pases expirados y facturas recurrentes).",
+        name="/sync `[dry_run]` `[threshold]`",
+        value="Ejecutar el proceso diario de sincronización manualmente.",
         inline=False
     )
     embed.add_field(
-        name="⚙️ `/check_config`",
-        value="Verifica que las credenciales y variables del entorno (.env) estén correctas.",
+        name="/check_config",
+        value="Verificar el estado de las variables de entorno `.env`.",
         inline=False
     )
 
-    await interaction.response.send_message(embed=embed, ephemeral=False)
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
-
-# ==============================================================================
-# BOT EVENT HANDLERS
-# ==============================================================================
 
 @bot.event
 async def on_ready():
-    logger.info(f"Bot conectado exitosamente como {bot.user} (ID: {bot.user.id})")
-    
-    guild_id = config.DISCORD_GUILD_ID
-    if guild_id and guild_id.isdigit():
-        guild_obj = discord.Object(id=int(guild_id))
-        bot.tree.copy_global_to(guild=guild_obj)
-        synced = await bot.tree.sync(guild=guild_obj)
-        logger.info(f"Sincronizados {len(synced)} comando(s) de barra diagonal en el servidor Guild ID: {guild_id}")
-    else:
+    logger.info(f"Discord Bot online as '{bot.user}' (ID: {bot.user.id})")
+    try:
         synced = await bot.tree.sync()
-        logger.info(f"Sincronizados {len(synced)} comando(s) de barra diagonal globalmente.")
+        logger.info(f"Synced {len(synced)} slash command(s) with Discord.")
+    except Exception as e:
+        logger.error(f"Failed to sync slash commands with Discord: {e}")
 
 def main():
-    token = config.DISCORD_BOT_TOKEN
-    if not token:
-        logger.error("Error: DISCORD_BOT_TOKEN no está configurado en el archivo .env.")
+    missing = check_system_config()
+    if missing:
+        logger.error(f"Cannot start Discord bot: missing environment variables: {', '.join(missing)}")
         sys.exit(1)
 
-    logger.info("Iniciando Bot de Discord...")
-    bot.run(token)
+    if not config.DISCORD_BOT_TOKEN:
+        logger.error("DISCORD_BOT_TOKEN is missing in environment variables.")
+        sys.exit(1)
+
+    logger.info("Starting Discord bot process...")
+    bot.run(config.DISCORD_BOT_TOKEN)
 
 if __name__ == "__main__":
     main()

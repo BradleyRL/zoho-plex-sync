@@ -553,6 +553,26 @@ class ZohoBooksService:
 
         return cid
 
+    def get_primary_contact_person_id(self, customer_id: str) -> Optional[str]:
+        """Retrieves the primary contact_person_id for a given customer_id in Zoho Books."""
+        if not customer_id:
+            return None
+        url = f"{self.cfg.ZOHO_BOOKS_API_URL}/contacts/{customer_id}"
+        params = {"organization_id": self.cfg.ZOHO_ORGANIZATION_ID}
+        try:
+            resp = requests.get(url, headers=self.get_headers(), params=params, timeout=30)
+            if resp.status_code == 200:
+                contact = resp.json().get("contact", {})
+                contact_persons = contact.get("contact_persons", [])
+                for cp in contact_persons:
+                    if cp.get("is_primary_contact"):
+                        return str(cp.get("contact_person_id"))
+                if contact_persons:
+                    return str(contact_persons[0].get("contact_person_id"))
+        except Exception as e:
+            logger.warning(f"Could not fetch primary contact person for customer '{customer_id}': {e}")
+        return None
+
     def create_recurring_invoice(
         self,
         customer_id: str,
@@ -561,11 +581,21 @@ class ZohoBooksService:
         item_id: str = "5251269000000090022",
         quantity: int = 1,
         never_expires: bool = True,
-        payment_terms: int = 0
+        payment_terms: int = 0,
+        customer_email: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Creates a new Recurring Invoice in Zoho Books upon temporary pass expiration.
+        Attaches contact_persons so payment notifications can be sent by email.
         """
+        if customer_email:
+            try:
+                self._ensure_contact_person_email(customer_id, recurrence_name, customer_email)
+            except Exception as e_cp:
+                logger.warning(f"Could not ensure contact person email for '{customer_id}': {e_cp}")
+
+        primary_cp_id = self.get_primary_contact_person_id(customer_id)
+
         url = f"{self.cfg.ZOHO_BOOKS_API_URL}/recurringinvoices"
         params = {"organization_id": self.cfg.ZOHO_ORGANIZATION_ID}
         
@@ -584,6 +614,10 @@ class ZohoBooksService:
                 }
             ]
         }
+
+        if primary_cp_id:
+            payload["contact_persons"] = [primary_cp_id]
+            logger.info(f"Attached primary contact_person_id '{primary_cp_id}' to recurring invoice payload.")
 
         logger.info(f"Creating Recurring Invoice in Zoho Books for customer ID '{customer_id}' ({recurrence_name})...")
         resp = requests.post(url, headers=self.get_headers(), params=params, json=payload, timeout=30)
