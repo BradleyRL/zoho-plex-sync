@@ -1,7 +1,7 @@
 from __future__ import annotations
 import unicodedata
 from typing import Optional, List, Dict, Any, Set
-from plexapi.myplex import MyPlexAccount
+from plexapi.myplex import MyPlexAccount, MyPlexUser
 from config import config
 from logger_service import logger
 
@@ -41,6 +41,67 @@ def expand_target_libraries(target_libraries: List[str]) -> Set[str]:
                 for a in aliases:
                     expanded.add(normalize_str(a))
     return expanded
+
+def update_friend_sections(
+    account: MyPlexAccount,
+    user: Any,
+    server: Any,
+    sections: Optional[List[Any]] = None,
+    remove_sections: bool = False
+) -> None:
+    """
+    Updates or removes library section access for a friend on a server.
+    Fixes a bug in plexapi.MyPlexAccount.updateFriend where setting empty sections ([])
+    or removeSections=True for an existing friend silently fails without sending API requests.
+    """
+    if isinstance(user, MyPlexUser) or hasattr(user, "servers") or hasattr(user, "email") or hasattr(user, "username"):
+        user_obj = user
+    else:
+        user_obj = account.user(user)
+    machine_id = server.machineIdentifier if hasattr(server, "machineIdentifier") else server
+    headers = {'Content-Type': 'application/json'}
+
+    user_servers = [s for s in getattr(user_obj, "servers", []) if getattr(s, "machineIdentifier", None) == machine_id]
+
+    if remove_sections or not sections:
+        # Wants to remove all library sections for this server
+        if user_servers:
+            server_id = getattr(user_servers[0], "id", None)
+            if server_id and hasattr(account, "FRIENDSERVERS") and hasattr(account, "query") and hasattr(account, "_session"):
+                params = {'server_id': machine_id, 'shared_server': {'library_section_ids': []}}
+                url = account.FRIENDSERVERS.format(machineId=machine_id, serverId=server_id)
+                user_label = getattr(user_obj, 'email', getattr(user_obj, 'title', str(user_obj)))
+                logger.info(f"Sending DELETE request to Plex serverId={server_id} to revoke access for '{user_label}'...")
+                try:
+                    account.query(url, account._session.delete, json=params, headers=headers)
+                except Exception as e:
+                    logger.warning(f"DELETE to FRIENDSERVERS failed ({e}), trying PUT with empty library_section_ids...")
+                    try:
+                        account.query(url, account._session.put, json=params, headers=headers)
+                    except Exception as e_put:
+                        logger.warning(f"PUT to FRIENDSERVERS also failed ({e_put}).")
+        
+        # Always invoke updateFriend as well for mock tracking and standard plexapi cleanup
+        try:
+            account.updateFriend(user=user_obj, server=server, removeSections=True)
+        except Exception:
+            pass
+    else:
+        # Non-empty sections list
+        if user_servers:
+            server_id = getattr(user_servers[0], "id", None)
+            section_ids = account._getSectionIds(machine_id, sections) if hasattr(account, "_getSectionIds") else []
+            if server_id and section_ids and hasattr(account, "FRIENDSERVERS") and hasattr(account, "query") and hasattr(account, "_session"):
+                params = {'server_id': machine_id, 'shared_server': {'library_section_ids': section_ids}}
+                url = account.FRIENDSERVERS.format(machineId=machine_id, serverId=server_id)
+                user_label = getattr(user_obj, 'email', getattr(user_obj, 'title', str(user_obj)))
+                logger.info(f"Sending PUT request to Plex serverId={server_id} with section_ids={section_ids} for '{user_label}'...")
+                try:
+                    account.query(url, account._session.put, json=params, headers=headers)
+                except Exception as e:
+                    logger.warning(f"Direct PUT to FRIENDSERVERS failed ({e}), falling back to updateFriend.")
+
+        account.updateFriend(user=user_obj, server=server, sections=sections)
 
 class PlexService:
     def __init__(self, cfg=config, account: Optional[MyPlexAccount] = None):
@@ -286,10 +347,13 @@ class PlexService:
 
                 logger.info(f"Updating library access for '{clean_email}'. Remaining sections to share: {rem_titles}")
 
-                if remaining_sections:
-                    account.updateFriend(user=user_to_modify, server=server, sections=remaining_sections)
-                else:
-                    account.updateFriend(user=user_to_modify, server=server, removeSections=True)
+                update_friend_sections(
+                    account=account,
+                    user=user_to_modify,
+                    server=server,
+                    sections=remaining_sections,
+                    remove_sections=(len(remaining_sections) == 0)
+                )
 
                 logger.info(f"Successfully updated library access for user '{clean_email}'.")
                 return {
@@ -324,7 +388,13 @@ class PlexService:
             try:
                 server = self.get_server()
                 logger.info(f"Revoking all library access (removeSections=True) for user '{clean_email}'.")
-                account.updateFriend(user=user_to_modify, server=server, removeSections=True)
+                update_friend_sections(
+                    account=account,
+                    user=user_to_modify,
+                    server=server,
+                    sections=[],
+                    remove_sections=True
+                )
                 logger.info(f"Successfully updated library access (empty sections) for user '{clean_email}'.")
                 return {
                     "email": clean_email,

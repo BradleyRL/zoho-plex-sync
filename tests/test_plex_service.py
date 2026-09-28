@@ -248,3 +248,36 @@ def test_grant_user_access_all_libraries():
         server=mock_server,
         sections=[sec1, sec2]
     )
+
+def test_update_friend_sections_direct_api_call():
+    from plex_service import update_friend_sections
+    
+    mock_account = MagicMock()
+    mock_account.FRIENDSERVERS = "https://plex.tv/api/servers/{machineId}/shared_servers/{serverId}"
+    mock_account._session = MagicMock()
+    
+    mock_server = MagicMock()
+    mock_server.machineIdentifier = "machine123"
+    
+    user = MagicMock()
+    user.email = "test@example.com"
+    server_share = MagicMock()
+    server_share.machineIdentifier = "machine123"
+    server_share.id = 999
+    user.servers = [server_share]
+    
+    update_friend_sections(
+        account=mock_account,
+        user=user,
+        server=mock_server,
+        sections=[],
+        remove_sections=True
+    )
+    
+    # Verify direct DELETE query call to FRIENDSERVERS endpoint was made
+    mock_account.query.assert_called_once_with(
+        "https://plex.tv/api/servers/machine123/shared_servers/999",
+        mock_account._session.delete,
+        json={'server_id': 'machine123', 'shared_server': {'library_section_ids': []}},
+        headers={'Content-Type': 'application/json'}
+    )
