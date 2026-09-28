@@ -278,6 +278,5 @@ def test_update_friend_sections_direct_api_call():
     mock_account.query.assert_called_once_with(
         "https://plex.tv/api/servers/machine123/shared_servers/999",
         mock_account._session.delete,
-        json={'server_id': 'machine123', 'shared_server': {'library_section_ids': []}},
         headers={'Content-Type': 'application/json'}
     )

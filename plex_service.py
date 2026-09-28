@@ -62,6 +62,55 @@ def is_section_in_targets(sec_title: str, target_libraries: List[str]) -> bool:
             return True
     return False
 
+def get_shared_server_id(account: MyPlexAccount, user_obj: Any, machine_id: str) -> Optional[int]:
+    """Finds the shared server ID (serverId) for a user on a given server machine_id."""
+    user_servers = getattr(user_obj, "servers", [])
+    for s in user_servers:
+        s_m_id = getattr(s, "machineIdentifier", None)
+        if s_m_id and str(s_m_id).lower() == str(machine_id).lower():
+            s_id = getattr(s, "id", None)
+            if s_id:
+                return s_id
+    if user_servers and len(user_servers) == 1:
+        s_id = getattr(user_servers[0], "id", None)
+        if s_id:
+            return s_id
+
+    # Fallback: Query FRIENDINVITE endpoint for the machine_id directly
+    try:
+        if hasattr(account, "FRIENDINVITE") and hasattr(account, "query"):
+            url = account.FRIENDINVITE.format(machineId=machine_id)
+            elem = account.query(url)
+            u_id = str(getattr(user_obj, "id", ""))
+            u_email = normalize_str(getattr(user_obj, "email", ""))
+            u_name = normalize_str(getattr(user_obj, "username", ""))
+            u_title = normalize_str(getattr(user_obj, "title", ""))
+
+            items = elem.findall(".//SharedServer") if hasattr(elem, "findall") else []
+            if not items and hasattr(elem, "tag") and elem.tag == "SharedServer":
+                items = [elem]
+            
+            for item in items:
+                item_user_id = str(item.attrib.get("userID", ""))
+                item_email = normalize_str(item.attrib.get("email", ""))
+                item_username = normalize_str(item.attrib.get("username", ""))
+                item_title = normalize_str(item.attrib.get("title", ""))
+                share_id = item.attrib.get("id")
+
+                if share_id:
+                    if u_id and item_user_id == u_id:
+                        return int(share_id)
+                    if u_email and item_email == u_email:
+                        return int(share_id)
+                    if u_name and item_username == u_name:
+                        return int(share_id)
+                    if u_title and item_title == u_title:
+                        return int(share_id)
+    except Exception as e:
+        logger.warning(f"Could not query FRIENDINVITE for machineId={machine_id}: {e}")
+
+    return None
+
 def update_friend_sections(
     account: MyPlexAccount,
     user: Any,
@@ -82,21 +131,46 @@ def update_friend_sections(
     machine_id = server.machineIdentifier if hasattr(server, "machineIdentifier") else server
     headers = {'Content-Type': 'application/json'}
 
-    user_servers = [s for s in getattr(user_obj, "servers", []) if getattr(s, "machineIdentifier", None) == machine_id]
+    server_id = get_shared_server_id(account, user_obj, machine_id)
+    user_label = getattr(user_obj, 'email', getattr(user_obj, 'title', str(user_obj)))
 
     if remove_sections or not sections:
         # User keeps friend status, but section access for this server is set to [] (0 libraries)
-        if user_servers:
-            server_id = getattr(user_servers[0], "id", None)
-            if server_id and hasattr(account, "FRIENDSERVERS") and hasattr(account, "query") and hasattr(account, "_session"):
-                params = {'server_id': machine_id, 'shared_server': {'library_section_ids': []}}
-                url = account.FRIENDSERVERS.format(machineId=machine_id, serverId=server_id)
-                user_label = getattr(user_obj, 'email', getattr(user_obj, 'title', str(user_obj)))
-                logger.info(f"Sending DELETE request to Plex serverId={server_id} to unshare libraries for '{user_label}'...")
+        if server_id and hasattr(account, "FRIENDSERVERS") and hasattr(account, "query") and hasattr(account, "_session"):
+            params = {'server_id': machine_id, 'shared_server': {'library_section_ids': []}}
+            url_v1 = account.FRIENDSERVERS.format(machineId=machine_id, serverId=server_id)
+            url_v2 = f"https://plex.tv/api/v2/shared_servers/{server_id}"
+            
+            logger.info(f"Revoking library access for '{user_label}' (serverId={server_id}, machineId={machine_id})...")
+            
+            success = False
+            # Attempt 1: v1 DELETE without body
+            try:
+                account.query(url_v1, account._session.delete, headers=headers)
+                logger.info(f"Successfully sent DELETE without body to {url_v1}")
+                success = True
+            except Exception as e1:
+                logger.warning(f"DELETE without body to {url_v1} failed ({e1}). Trying with json body...")
+
+            # Attempt 2: v1 DELETE with json body
+            if not success:
                 try:
-                    account.query(url, account._session.delete, json=params, headers=headers)
-                except Exception as e:
-                    logger.warning(f"DELETE to FRIENDSERVERS failed ({e}).")
+                    account.query(url_v1, account._session.delete, json=params, headers=headers)
+                    logger.info(f"Successfully sent DELETE with json body to {url_v1}")
+                    success = True
+                except Exception as e2:
+                    logger.warning(f"DELETE with json body to {url_v1} failed ({e2}). Trying v2 endpoint...")
+
+            # Attempt 3: v2 DELETE
+            if not success:
+                try:
+                    account.query(url_v2, account._session.delete, headers=headers)
+                    logger.info(f"Successfully sent DELETE to {url_v2}")
+                    success = True
+                except Exception as e3:
+                    logger.error(f"All DELETE requests to FRIENDSERVERS failed for '{user_label}': {e3}")
+        else:
+            logger.warning(f"Could not find shared server_id for '{user_label}' on machine {machine_id}. Falling back to updateFriend.")
         
         # Always invoke updateFriend for mock tracking/plexapi internal state if needed
         try:
@@ -105,13 +179,11 @@ def update_friend_sections(
             pass
     else:
         # Non-empty sections list
-        if user_servers:
-            server_id = getattr(user_servers[0], "id", None)
+        if server_id and hasattr(account, "FRIENDSERVERS") and hasattr(account, "query") and hasattr(account, "_session"):
             section_ids = account._getSectionIds(machine_id, sections) if hasattr(account, "_getSectionIds") else []
-            if server_id and section_ids and hasattr(account, "FRIENDSERVERS") and hasattr(account, "query") and hasattr(account, "_session"):
+            if section_ids:
                 params = {'server_id': machine_id, 'shared_server': {'library_section_ids': section_ids}}
                 url = account.FRIENDSERVERS.format(machineId=machine_id, serverId=server_id)
-                user_label = getattr(user_obj, 'email', getattr(user_obj, 'title', str(user_obj)))
                 logger.info(f"Sending PUT request to Plex serverId={server_id} with section_ids={section_ids} for '{user_label}'...")
                 try:
                     account.query(url, account._session.put, json=params, headers=headers)
