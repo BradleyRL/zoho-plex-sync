@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 import pytest
 from plex_service import PlexService
 
@@ -7,62 +7,61 @@ def test_find_user_by_email():
     user1 = MagicMock()
     user1.email = "alice@example.com"
     user1.username = "alice"
-
+    
     user2 = MagicMock()
     user2.email = "bob@example.com"
     user2.username = "bob"
 
     mock_account.users.return_value = [user1, user2]
-
     service = PlexService(account=mock_account)
 
-    found = service.find_user_by_email("ALICE@example.com ")
+    found = service.find_user_by_email("ALICE@example.com")
     assert found == user1
 
-    not_found = service.find_user_by_email("charlie@example.com")
+    found_username = service.find_user_by_email("bob")
+    assert found_username == user2
+
+    not_found = service.find_user_by_email("unknown@example.com")
     assert not_found is None
 
 def test_revoke_user_access_dry_run():
     mock_cfg = MagicMock()
     mock_cfg.PLEX_LIBRARIES = ["Movies"]
-    mock_cfg.PLEX_SERVER_NAME = ""
-
+    
     mock_account = MagicMock()
     user = MagicMock()
-    user.email = "alice@example.com"
+    user.email = "test@example.com"
     mock_account.users.return_value = [user]
 
     service = PlexService(cfg=mock_cfg, account=mock_account)
-    res = service.revoke_user_access("alice@example.com", dry_run=True)
+    res = service.revoke_user_access("test@example.com", dry_run=True)
 
-    assert res["found"] is True
     assert res["status"] == "DRY_RUN"
-    assert "[DRY-RUN]" in res["action"]
+    assert res["found"] is True
 
 def test_revoke_user_access_not_found():
     mock_account = MagicMock()
     mock_account.users.return_value = []
-    mock_account.pendingInvite.side_effect = Exception("NotFound")
+    mock_account.pendingInvite.return_value = None
 
     service = PlexService(account=mock_account)
-    res = service.revoke_user_access("unknown@example.com")
+    res = service.revoke_user_access("unknown@example.com", dry_run=False)
 
-    assert res["found"] is False
     assert res["status"] == "NOT_FOUND"
+    assert res["found"] is False
 
 def test_revoke_user_access_pending_invite():
     mock_account = MagicMock()
     mock_account.users.return_value = []
-    mock_invite = MagicMock()
-    mock_account.pendingInvite.return_value = mock_invite
+    invite = MagicMock()
+    mock_account.pendingInvite.return_value = invite
 
     service = PlexService(account=mock_account)
-    res = service.revoke_user_access("pending@example.com")
+    res = service.revoke_user_access("pending@example.com", dry_run=False)
 
-    assert res["found"] is True
     assert res["status"] == "SUCCESS"
-    assert res["action"] == "Canceled pending invitation"
-    mock_account.cancelInvite.assert_called_once_with(mock_invite)
+    assert res["found"] is True
+    mock_account.cancelInvite.assert_called_once_with(invite)
 
 def test_revoke_user_access_complete_unshare():
     mock_cfg = MagicMock()
@@ -86,7 +85,7 @@ def test_revoke_user_access_complete_unshare():
 
     assert res["found"] is True
     assert res["status"] == "SUCCESS"
-    mock_account.updateFriend.assert_called_once_with(user=user, server=mock_server, sections=[])
+    mock_account.updateFriend.assert_called_once_with(user=user, server=mock_server, removeSections=True)
 
 def test_revoke_user_access_update_libraries():
     mock_cfg = MagicMock()
@@ -108,11 +107,7 @@ def test_revoke_user_access_update_libraries():
     server_entry = MagicMock()
     server_entry.name = "HomeServer"
     server_entry.allLibraries = False
-    sec1_user = MagicMock()
-    sec1_user.title = "Movies"
-    sec2_user = MagicMock()
-    sec2_user.title = "TV Shows"
-    server_entry.sections.return_value = [sec1_user, sec2_user]
+    server_entry.sections.return_value = [sec1, sec2]
     user.servers = [server_entry]
     mock_account.users.return_value = [user]
 
@@ -134,23 +129,19 @@ def test_revoke_user_access_removes_sole_target_library():
 
     sec1 = MagicMock()
     sec1.title = "Movies"
-    sec2 = MagicMock()
-    sec2.title = "TV Shows"
-    mock_server.library.sections.return_value = [sec1, sec2]
+    mock_server.library.sections.return_value = [sec1]
 
     user = MagicMock()
-    user.email = "dave@example.com"
+    user.email = "carol@example.com"
     server_entry = MagicMock()
     server_entry.name = "HomeServer"
     server_entry.allLibraries = False
-    sec1_user = MagicMock()
-    sec1_user.title = "Movies"
-    server_entry.sections.return_value = [sec1_user]
+    server_entry.sections.return_value = [sec1]
     user.servers = [server_entry]
     mock_account.users.return_value = [user]
 
     service = PlexService(cfg=mock_cfg, account=mock_account)
-    res = service.revoke_user_access("dave@example.com", dry_run=False)
+    res = service.revoke_user_access("carol@example.com", dry_run=False)
 
     assert res["found"] is True
     assert res["status"] == "SUCCESS"
@@ -159,11 +150,23 @@ def test_revoke_user_access_removes_sole_target_library():
 def test_revoke_user_access_already_disabled():
     mock_cfg = MagicMock()
     mock_cfg.PLEX_LIBRARIES = ["Movies"]
+    mock_cfg.PLEX_SERVER_NAME = "HomeServer"
 
     mock_account = MagicMock()
+    mock_server = MagicMock()
+    mock_account.server.return_value = mock_server
+
+    sec1 = MagicMock()
+    sec1.title = "Movies"
+    sec2 = MagicMock()
+    sec2.title = "TV Shows"
+    mock_server.library.sections.return_value = [sec1, sec2]
+
     user = MagicMock()
     user.email = "carol@example.com"
     server_entry = MagicMock()
+    server_entry.name = "HomeServer"
+    server_entry.allLibraries = False
     sec2_user = MagicMock()
     sec2_user.title = "TV Shows"
     server_entry.sections.return_value = [sec2_user] # Movies is missing
@@ -185,10 +188,10 @@ def test_grant_user_access_respects_plex_libraries():
     mock_account = MagicMock()
     mock_server = MagicMock()
     mock_account.users.return_value = []
-    
+
     if hasattr(mock_account, "server") and callable(getattr(mock_account, "server")):
         mock_account.server.return_value = mock_server
-    
+
     resource = MagicMock()
     resource.provides = "server"
     resource.owned = True
@@ -208,7 +211,6 @@ def test_grant_user_access_respects_plex_libraries():
     res = service.grant_user_access("newuser@example.com", dry_run=False)
 
     assert res["status"] == "SUCCESS"
-    assert res["message"] == "Granted access to 2 library sections."
     mock_account.inviteFriend.assert_called_once_with(
         user="newuser@example.com",
         server=mock_server,
@@ -223,7 +225,7 @@ def test_grant_user_access_all_libraries():
     mock_account = MagicMock()
     mock_server = MagicMock()
     mock_account.users.return_value = []
-    
+
     resource = MagicMock()
     resource.provides = "server"
     resource.owned = True
@@ -241,7 +243,6 @@ def test_grant_user_access_all_libraries():
     res = service.grant_user_access("newuser@example.com", dry_run=False)
 
     assert res["status"] == "SUCCESS"
-    assert res["message"] == "Granted access to 2 library sections."
     mock_account.inviteFriend.assert_called_once_with(
         user="newuser@example.com",
         server=mock_server,

@@ -809,8 +809,10 @@ async def sync(
     embed.add_field(name="Resumen de Ejecución", value=summary_text, inline=False)
 
     if data["expired_processed"]:
-        exp_text = "\n".join([f"• `{p['email']}` - Status: `{p['status']}`" for p in data["expired_processed"][:5]])
-        embed.add_field(name="Pases Temporales Procesados", value=exp_text, inline=False)
+        exp_text = "\n".join([f"• `{p['email']}` ({p.get('customer', '')}) - Status: `{p['status']}` | Factura: `{p.get('rec_invoice', 'N/A')}`" for p in data["expired_processed"][:10]])
+        embed.add_field(name="🎟️ Pases Temporales Expirados Procesados", value=exp_text, inline=False)
+    else:
+        embed.add_field(name="🎟️ Pases Temporales Expirados", value="Ningún pase temporal expiró hoy.", inline=False)
 
     revoked_list = data.get("revoked_list", [])
     if revoked_list:

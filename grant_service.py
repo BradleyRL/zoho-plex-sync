@@ -38,9 +38,15 @@ class GrantService:
                     converted_temp = []
                     for k, v in temp_passes.items():
                         if isinstance(v, dict):
-                            converted_temp.append(v)
+                            v_copy = dict(v)
+                            if "email" not in v_copy:
+                                v_copy["email"] = str(k).strip().lower()
+                            converted_temp.append(v_copy)
                         else:
-                            converted_temp.append({"email": str(k).strip().lower()})
+                            converted_temp.append({
+                                "email": str(k).strip().lower(),
+                                "expires_at": str(v)
+                            })
                     data["temporary_passes"] = converted_temp
                 else:
                     data["temporary_passes"] = []
@@ -69,7 +75,13 @@ class GrantService:
     @staticmethod
     def _get_pass_email(p: Any) -> str:
         if isinstance(p, dict):
-            return str(p.get("email", "")).strip().lower()
+            email = p.get("email") or p.get("user") or p.get("mail")
+            if email:
+                return str(email).strip().lower()
+            for k in p.keys():
+                if "@" in str(k):
+                    return str(k).strip().lower()
+            return ""
         elif isinstance(p, str):
             return p.strip().lower()
         return ""
@@ -77,7 +89,12 @@ class GrantService:
     @staticmethod
     def _get_pass_expires_at(p: Any) -> str:
         if isinstance(p, dict):
-            return str(p.get("expires_at", ""))
+            for key in ("expires_at", "expiration", "expires", "valid_until", "expire"):
+                if key in p and p[key]:
+                    return str(p[key])
+            for v in p.values():
+                if isinstance(v, str) and ("202" in v or "-" in v):
+                    return str(v)
         return ""
 
     def add_temporary_pass(
@@ -171,18 +188,27 @@ class GrantService:
         if not val:
             return None
         if isinstance(val, datetime):
-            return val
+            dt = val
+            if dt.tzinfo is not None:
+                dt = dt.replace(tzinfo=None)
+            return dt
         val_str = str(val).strip()
         if not val_str:
             return None
         clean_str = val_str.replace("T", " ")
         for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
             try:
-                return datetime.strptime(clean_str, fmt)
+                dt = datetime.strptime(clean_str, fmt)
+                if dt.tzinfo is not None:
+                    dt = dt.replace(tzinfo=None)
+                return dt
             except ValueError:
                 pass
         try:
-            return datetime.fromisoformat(val_str)
+            dt = datetime.fromisoformat(val_str)
+            if dt.tzinfo is not None:
+                dt = dt.replace(tzinfo=None)
+            return dt
         except ValueError:
             pass
         return None
@@ -215,18 +241,28 @@ class GrantService:
         expired = []
         remaining = []
 
-        for pass_info in data.get("temporary_passes", []):
+        all_passes = data.get("temporary_passes", [])
+        logger.info(f"GrantService: Inspecting {len(all_passes)} temporary pass(es) in grants.json against current time {now.strftime('%Y-%m-%d %H:%M:%S')}...")
+
+        for pass_info in all_passes:
             email = self._get_pass_email(pass_info)
             expires_at_raw = self._get_pass_expires_at(pass_info)
             dt_expires = self._parse_datetime(expires_at_raw)
+
+            logger.info(f"GrantService check: email='{email}', expires_at_raw='{expires_at_raw}', parsed={dt_expires}")
+
             if not dt_expires or dt_expires <= now:
                 if email:
+                    cust_name = pass_info.get("customer_name") if isinstance(pass_info, dict) else email
+                    cust_id = pass_info.get("customer_id") if isinstance(pass_info, dict) else ""
+                    logger.info(f"GrantService: Temporary pass for '{email}' is EXPIRED (expires: {expires_at_raw}).")
                     expired.append({
                         "email": email,
-                        "customer_name": pass_info.get("customer_name") if isinstance(pass_info, dict) else email,
-                        "customer_id": pass_info.get("customer_id") if isinstance(pass_info, dict) else ""
+                        "customer_name": cust_name or email,
+                        "customer_id": cust_id or ""
                     })
             else:
+                logger.info(f"GrantService: Temporary pass for '{email}' is still ACTIVE until {expires_at_raw}.")
                 remaining.append(pass_info)
 
         if expired:

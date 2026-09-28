@@ -11,6 +11,15 @@ def normalize_str(s: str) -> str:
     nfkd = unicodedata.normalize('NFKD', str(s))
     return "".join([c for c in nfkd if not unicodedata.combining(c)]).strip().lower()
 
+def get_section_title(sec: Any) -> str:
+    if isinstance(sec, str):
+        return sec
+    for attr in ("title", "name", "sectionName", "key"):
+        val = getattr(sec, attr, None)
+        if val and isinstance(val, str):
+            return val
+    return str(sec)
+
 class PlexService:
     def __init__(self, cfg=config, account: Optional[MyPlexAccount] = None):
         self.cfg = cfg
@@ -96,7 +105,7 @@ class PlexService:
         Revokes or limits Plex library access for a user identified by email address.
         Cancels pending invitations if unaccepted, or removes/updates shared libraries if accepted.
         If PLEX_LIBRARIES is configured in .env (e.g. Peliculas,Series):
-            Removes only those libraries for the user. If no remaining libraries are left, removes user completely.
+            Removes only those libraries for the user. If no remaining libraries are left, removes user access.
         If PLEX_LIBRARIES is empty or "ALL":
             Unshares the user completely from the server/account.
         """
@@ -202,8 +211,14 @@ class PlexService:
                 else:
                     current_sections = all_server_sections
 
-                user_has_target_lib = any(
-                    normalize_str(getattr(sec, "title", sec if isinstance(sec, str) else "")) in target_libs_norm 
+                curr_titles = [get_section_title(sec) for sec in current_sections]
+                logger.info(
+                    f"User '{clean_email}' currently shared sections: {curr_titles}. "
+                    f"Target libraries to remove: {target_libraries}"
+                )
+
+                user_has_target_lib = all_libraries_shared or any(
+                    normalize_str(get_section_title(sec)) in target_libs_norm 
                     for sec in current_sections
                 )
 
@@ -219,14 +234,17 @@ class PlexService:
 
                 remaining_sections = []
                 for sec in all_server_sections:
-                    sec_norm = normalize_str(getattr(sec, "title", sec if isinstance(sec, str) else ""))
+                    sec_norm = normalize_str(get_section_title(sec))
                     if sec_norm in target_libs_norm:
                         continue
                     if all_libraries_shared or not user_server or any(
-                        normalize_str(getattr(c_sec, "title", c_sec if isinstance(c_sec, str) else "")) == sec_norm 
+                        normalize_str(get_section_title(c_sec)) == sec_norm 
                         for c_sec in current_sections
                     ):
                         remaining_sections.append(sec)
+
+                rem_titles = [get_section_title(sec) for sec in remaining_sections]
+                logger.info(f"Updating library access for '{clean_email}'. Remaining sections to share: {rem_titles}")
 
                 if remaining_sections:
                     account.updateFriend(user=user_to_modify, server=server, sections=remaining_sections)
@@ -265,7 +283,8 @@ class PlexService:
 
             try:
                 server = self.get_server()
-                account.updateFriend(user=user_to_modify, server=server, sections=[])
+                logger.info(f"Revoking all library access (removeSections=True) for user '{clean_email}'.")
+                account.updateFriend(user=user_to_modify, server=server, removeSections=True)
                 logger.info(f"Successfully updated library access (empty sections) for user '{clean_email}'.")
                 return {
                     "email": clean_email,

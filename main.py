@@ -422,6 +422,7 @@ def main():
     logger.info("==================================================")
 
     # STEP 1: Process and revoke expired 2-day temporary passes & create Recurring Invoices in Zoho
+    logger.info("[STEP 1] Checking for expired temporary passes in grants.json...")
     expired_temp_passes = grant_service.get_expired_temporary_passes()
     expired_processed = []
     if expired_temp_passes:

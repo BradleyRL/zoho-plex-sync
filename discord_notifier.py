@@ -40,11 +40,17 @@ def send_discord_sync_summary(
 
     if expired_processed:
         exp_lines = []
-        for p in expired_processed[:5]:
-            exp_lines.append(f"• `{p['email']}` ({p.get('customer', '')}) - Rec. Inv: `{p.get('rec_invoice', 'N/A')}`")
+        for p in expired_processed[:10]:
+            exp_lines.append(f"• `{p['email']}` ({p.get('customer', '')}) - Status: `{p.get('status', 'N/A')}` | Rec. Inv: `{p.get('rec_invoice', 'N/A')}`")
         fields.append({
-            "name": "Pases Temporales Procesados",
+            "name": "🎟️ Pases Temporales Expirados Procesados",
             "value": "\n".join(exp_lines),
+            "inline": False
+        })
+    else:
+        fields.append({
+            "name": "🎟️ Pases Temporales Expirados",
+            "value": "Ningún pase temporal expiró hoy.",
             "inline": False
         })
 
