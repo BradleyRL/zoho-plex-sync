@@ -73,7 +73,7 @@ def update_friend_sections(
     Updates library section access for a friend on a server.
     Fixes a bug in plexapi.MyPlexAccount.updateFriend where setting empty sections ([])
     or removeSections=True for an existing friend silently fails without sending API requests.
-    Sends PUT with library_section_ids=[] so the user remains a friend on Plex with 0 libraries shared.
+    Sends DELETE request to FRIENDSERVERS so library access is removed while keeping friend status on Plex.
     """
     if isinstance(user, MyPlexUser) or hasattr(user, "servers") or hasattr(user, "email") or hasattr(user, "username"):
         user_obj = user
@@ -92,11 +92,11 @@ def update_friend_sections(
                 params = {'server_id': machine_id, 'shared_server': {'library_section_ids': []}}
                 url = account.FRIENDSERVERS.format(machineId=machine_id, serverId=server_id)
                 user_label = getattr(user_obj, 'email', getattr(user_obj, 'title', str(user_obj)))
-                logger.info(f"Sending PUT request to Plex serverId={server_id} with library_section_ids=[] to unshare libraries for '{user_label}'...")
+                logger.info(f"Sending DELETE request to Plex serverId={server_id} to unshare libraries for '{user_label}'...")
                 try:
-                    account.query(url, account._session.put, json=params, headers=headers)
+                    account.query(url, account._session.delete, json=params, headers=headers)
                 except Exception as e:
-                    logger.warning(f"PUT to FRIENDSERVERS failed ({e}).")
+                    logger.warning(f"DELETE to FRIENDSERVERS failed ({e}).")
         
         # Always invoke updateFriend for mock tracking/plexapi internal state if needed
         try:
