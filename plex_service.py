@@ -137,6 +137,7 @@ def update_friend_sections(
     if remove_sections or not sections:
         # User keeps friend status, but section access for this server is set to [] (0 libraries)
         if server_id and hasattr(account, "FRIENDSERVERS") and hasattr(account, "query") and hasattr(account, "_session"):
+            params = {'server_id': machine_id, 'shared_server': {'library_section_ids': []}}
             url_v1 = account.FRIENDSERVERS.format(machineId=machine_id, serverId=server_id)
             url_v2 = f"https://plex.tv/api/v2/shared_servers/{server_id}"
             
