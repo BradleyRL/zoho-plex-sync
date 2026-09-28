@@ -552,50 +552,10 @@ def main():
 
     logger.info("--------------------------------------------------")
     logger.info(
-        f"Overdue Processing finished. Total: {len(filtered_users_to_disable)} | "
+        f"Processing finished. Total: {len(filtered_users_to_disable)} | "
         f"Revoked/Updated: {success_count} | Already Disabled: {already_disabled_count} | "
         f"Plex Not Found: {not_found_count} | Failed: {failed_count}"
     )
-
-    # STEP 3: Check and Revoke Inactive Plex Users (Users without active recurring invoice, without active temp pass, without perm pass)
-    logger.info("Checking for inactive Plex users without active recurring invoice or valid pass...")
-    inactive_revoked_count = 0
-    try:
-        plex_users = plex_service.get_all_shared_users()
-        active_emails = zoho_service.get_active_recurring_invoice_emails()
-        
-        for u in plex_users:
-            u_email = u.get("email")
-            u_username = u.get("username")
-            u_title = u.get("title")
-
-            is_active_in_zoho = (
-                (u_email and u_email.lower() in active_emails) or
-                (u_username and u_username.lower() in active_emails) or
-                (u_title and u_title.lower() in active_emails)
-            )
-
-            has_perm_pass = grant_service.is_permanently_allowed(u_email) if u_email else False
-            has_temp_pass = grant_service.is_temporary_active(u_email) if u_email else False
-
-            target_email = u_email or u_username
-            if not is_active_in_zoho and not has_perm_pass and not has_temp_pass and target_email:
-                logger.info(f"User '{target_email}' has no active recurring invoice or pass in Zoho. Revoking access...")
-                res = plex_service.revoke_user_access(email=target_email, dry_run=args.dry_run)
-                log_disabled_user(
-                    email=target_email,
-                    customer_name=u.get("title") or u_username or target_email,
-                    invoice_numbers=["INACTIVE-NO-SUBSCRIPTION"],
-                    max_days_overdue=0,
-                    action=res["action"],
-                    status=res["status"],
-                    dry_run=args.dry_run
-                )
-                if res["status"] in ("SUCCESS", "DRY_RUN"):
-                    inactive_revoked_count += 1
-    except Exception as e_inact:
-        logger.error(f"Error checking inactive Plex users: {e_inact}")
-
     logger.info("==================================================")
 
     # Send summary Embed report to Discord Channel (Cron / CLI execution notification)
@@ -604,8 +564,8 @@ def main():
         "threshold": threshold,
         "expired_processed": expired_processed,
         "summary": {
-            "total": len(filtered_users_to_disable) + inactive_revoked_count,
-            "success": success_count + inactive_revoked_count,
+            "total": len(filtered_users_to_disable),
+            "success": success_count,
             "already_disabled": already_disabled_count,
             "not_found": not_found_count,
             "failed": failed_count

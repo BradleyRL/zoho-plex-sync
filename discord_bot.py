@@ -769,52 +769,6 @@ async def sync(
                 "status": st
             })
 
-        # STEP 3: Check and Revoke Inactive Plex Users (Users without active recurring invoice in Zoho, without temp pass, without perm pass)
-        try:
-            plex_users = plex_service.get_all_shared_users()
-            active_emails = zoho_service.get_active_recurring_invoice_emails()
-            for u in plex_users:
-                u_email = u.get("email")
-                u_username = u.get("username")
-                u_title = u.get("title")
-
-                is_active_in_zoho = (
-                    (u_email and u_email.lower() in active_emails) or
-                    (u_username and u_username.lower() in active_emails) or
-                    (u_title and u_title.lower() in active_emails)
-                )
-
-                has_perm_pass = grant_service.is_permanently_allowed(u_email) if u_email else False
-                has_temp_pass = grant_service.is_temporary_active(u_email) if u_email else False
-
-                target_email = u_email or u_username
-                if not is_active_in_zoho and not has_perm_pass and not has_temp_pass and target_email:
-                    res = plex_service.revoke_user_access(email=target_email, dry_run=dry_run)
-                    log_disabled_user(
-                        email=target_email,
-                        customer_name=u.get("title") or u_username or target_email,
-                        invoice_numbers=["INACTIVE-NO-SUBSCRIPTION"],
-                        max_days_overdue=0,
-                        action=res["action"],
-                        status=res["status"],
-                        dry_run=dry_run
-                    )
-                    st = res["status"]
-                    if st in ("SUCCESS", "DRY_RUN"):
-                        summary["success"] += 1
-                        summary["total"] += 1
-                    elif st == "ALREADY_DISABLED":
-                        summary["already_disabled"] += 1
-                        summary["total"] += 1
-                    revoked_list.append({
-                        "email": target_email,
-                        "customer": u.get("title") or u_username or target_email,
-                        "invoices": "NO-ACTIVE-SUBSCRIPTION",
-                        "status": st
-                    })
-        except Exception as e_inact:
-            logger.error(f"Error checking inactive Plex users in sync: {e_inact}")
-
         return {
             "dry_run": dry_run,
             "threshold": eff_threshold,
