@@ -435,7 +435,7 @@ class ZohoBooksService:
         except Exception as e:
             logger.warning(f"Could not verify/update contact person email for customer {contact_id}: {e}")
 
-    def create_customer(self, contact_name: str, email: str, currency_code: str = "GTQ") -> str:
+    def create_customer(self, contact_name: str, email: str, currency_code: str = config.ZOHO_DEFAULT_CURRENCY) -> str:
         """
         Creates a new customer contact in Zoho Books (or returns existing customer_id if email or name exists).
         Ensures the primary contact person has the specified email address.

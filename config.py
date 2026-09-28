@@ -17,6 +17,8 @@ class Config:
     ZOHO_REFRESH_TOKEN: str = os.getenv("ZOHO_REFRESH_TOKEN", "")
     ZOHO_ORGANIZATION_ID: str = os.getenv("ZOHO_ORGANIZATION_ID", "")
     ZOHO_DOMAIN: str = os.getenv("ZOHO_DOMAIN", "com").strip().lower()
+    ZOHO_DEFAULT_CURRENCY: str = os.getenv("ZOHO_DEFAULT_CURRENCY", "GTQ").strip().upper()
+    ZOHO_DEFAULT_ITEM_ID: str = os.getenv("ZOHO_DEFAULT_ITEM_ID", "5251269000000090022").strip()
 
     @property
     def ZOHO_ACCOUNTS_URL(self) -> str:
@@ -58,6 +60,7 @@ class Config:
 
     # Business Rules
     OVERDUE_DAYS_THRESHOLD: int = int(os.getenv("OVERDUE_DAYS_THRESHOLD", "3"))
+    VOID_OVERDUE_DAYS_THRESHOLD: int = int(os.getenv("VOID_OVERDUE_DAYS_THRESHOLD", "20"))
 
     # Logging
     LOG_DIR: Path = BASE_DIR / os.getenv("LOG_DIR", "logs")

@@ -107,13 +107,13 @@ def handle_grant_temp(
         logger.error("Error: --name [CUSTOMER_NAME] is required when using --grant-temp.")
         sys.exit(1)
 
-    logger.info(f"[OPTION 1] Creating/fetching customer '{customer_name}' in Zoho Books (currency GTQ)...")
+    logger.info(f"[OPTION 1] Creating/fetching customer '{customer_name}' in Zoho Books (currency {config.ZOHO_DEFAULT_CURRENCY})...")
     if dry_run:
-        logger.info(f"[DRY-RUN] Would create customer '{customer_name}' ({email}) in Zoho Books with currency GTQ.")
+        logger.info(f"[DRY-RUN] Would create customer '{customer_name}' ({email}) in Zoho Books with currency {config.ZOHO_DEFAULT_CURRENCY}.")
         customer_id = "DRY_RUN_CUSTOMER_ID"
     else:
         try:
-            customer_id = zoho_service.create_customer(contact_name=customer_name, email=email, currency_code="GTQ")
+            customer_id = zoho_service.create_customer(contact_name=customer_name, email=email, currency_code=config.ZOHO_DEFAULT_CURRENCY)
         except Exception as e:
             logger.error(f"Failed to create customer in Zoho Books: {e}")
             sys.exit(1)
@@ -178,13 +178,13 @@ def handle_grant_permanent(
     logger.info(f"[OPTION 3] Granting permanent access for '{email}'...")
     customer_id = None
     if customer_name:
-        logger.info(f"[OPTION 3] Creating/fetching customer '{customer_name}' in Zoho Books (currency GTQ)...")
+        logger.info(f"[OPTION 3] Creating/fetching customer '{customer_name}' in Zoho Books (currency {config.ZOHO_DEFAULT_CURRENCY})...")
         if dry_run:
-            logger.info(f"[DRY-RUN] Would create customer '{customer_name}' ({email}) in Zoho Books with currency GTQ.")
+            logger.info(f"[DRY-RUN] Would create customer '{customer_name}' ({email}) in Zoho Books with currency {config.ZOHO_DEFAULT_CURRENCY}.")
             customer_id = "DRY_RUN_CUSTOMER_ID"
         else:
             try:
-                customer_id = zoho_service.create_customer(contact_name=customer_name, email=email, currency_code="GTQ")
+                customer_id = zoho_service.create_customer(contact_name=customer_name, email=email, currency_code=config.ZOHO_DEFAULT_CURRENCY)
             except Exception as e:
                 logger.error(f"Failed to create customer in Zoho Books: {e}")
                 sys.exit(1)
@@ -196,7 +196,7 @@ def handle_grant_permanent(
                     customer_id=customer_id,
                     recurrence_name=customer_name,
                     start_date=today_str,
-                    item_id="5251269000000090022",
+                    item_id=config.ZOHO_DEFAULT_ITEM_ID,
                     quantity=1,
                     never_expires=True,
                     payment_terms=0,
@@ -444,7 +444,7 @@ def main():
                             customer_id=customer_id,
                             recurrence_name=customer_name,
                             start_date=today_str,
-                            item_id="5251269000000090022",
+                            item_id=config.ZOHO_DEFAULT_ITEM_ID,
                             quantity=1,
                             never_expires=True,
                             payment_terms=0,
@@ -515,8 +515,8 @@ def main():
                 inv_num = inv_detail.get("invoice_number")
                 cust_id = inv_detail.get("customer_id") or user_info.get("customer_id")
 
-                if days_ov >= 20:
-                    logger.info(f"Invoice #{inv_num} is {days_ov} days overdue (>= 20 days). Voiding invoice and stopping recurring invoice...")
+                if days_ov >= config.VOID_OVERDUE_DAYS_THRESHOLD:
+                    logger.info(f"Invoice #{inv_num} is {days_ov} days overdue (>= {config.VOID_OVERDUE_DAYS_THRESHOLD} days). Voiding invoice and stopping recurring invoice...")
                     if args.dry_run:
                         logger.info(f"[DRY-RUN] Would mark invoice #{inv_num} (ID: {inv_id}) as VOID ('No Renovó') and STOP recurring invoice for customer {cust_id}.")
                     else:

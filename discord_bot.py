@@ -104,7 +104,7 @@ async def grant_temp(
             customer_id = "DRY_RUN_CUSTOMER_ID"
         else:
             try:
-                customer_id = zoho_service.create_customer(contact_name=name, email=email, currency_code="GTQ")
+                customer_id = zoho_service.create_customer(contact_name=name, email=email, currency_code=config.ZOHO_DEFAULT_CURRENCY)
             except Exception as e:
                 return {"error": f"Error al crear cliente en Zoho Books: {e}"}
 
@@ -285,7 +285,7 @@ async def grant_permanent(
                 rec_inv_status = "[DRY-RUN] Se crearía factura recurrente"
             else:
                 try:
-                    customer_id = zoho_service.create_customer(contact_name=clean_name, email=email, currency_code="GTQ")
+                    customer_id = zoho_service.create_customer(contact_name=clean_name, email=email, currency_code=config.ZOHO_DEFAULT_CURRENCY)
                 except Exception as e:
                     return {"error": f"Error al crear cliente en Zoho Books: {e}"}
 
@@ -295,7 +295,7 @@ async def grant_permanent(
                         customer_id=customer_id,
                         recurrence_name=clean_name,
                         start_date=today_str,
-                        item_id="5251269000000090022",
+                        item_id=config.ZOHO_DEFAULT_ITEM_ID,
                         quantity=1,
                         never_expires=True,
                         payment_terms=0,
@@ -659,7 +659,7 @@ async def sync(
                                 customer_id=customer_id,
                                 recurrence_name=customer_name,
                                 start_date=today_str,
-                                item_id="5251269000000090022",
+                                item_id=config.ZOHO_DEFAULT_ITEM_ID,
                                 quantity=1,
                                 never_expires=True,
                                 payment_terms=0,
