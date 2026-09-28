@@ -143,19 +143,19 @@ def update_friend_sections(
             logger.info(f"Revoking all library access for '{user_label}' by deleting shared server (serverId={server_id}, machineId={machine_id})...")
             
             success = False
-            # Attempt 1: v1 DELETE
+            # Attempt 1: v2 DELETE (Modern API)
             try:
-                account.query(url_v1, account._session.delete)
-                logger.info(f"Successfully sent DELETE to {url_v1}")
+                account.query(url_v2, account._session.delete)
+                logger.info(f"Successfully sent DELETE to {url_v2}")
                 success = True
             except Exception as e1:
-                logger.warning(f"DELETE to {url_v1} failed ({e1}). Trying v2 endpoint...")
+                logger.warning(f"DELETE to {url_v2} failed ({e1}). Trying v1 endpoint...")
 
-            # Attempt 2: v2 DELETE
+            # Attempt 2: v1 DELETE (Legacy API)
             if not success:
                 try:
-                    account.query(url_v2, account._session.delete)
-                    logger.info(f"Successfully sent DELETE to {url_v2}")
+                    account.query(url_v1, account._session.delete)
+                    logger.info(f"Successfully sent DELETE to {url_v1}")
                     success = True
                 except Exception as e3:
                     logger.error(f"All DELETE requests to remove shared server failed for '{user_label}': {e3}")
