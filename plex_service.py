@@ -1,6 +1,6 @@
 from __future__ import annotations
 import unicodedata
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Set
 from plexapi.myplex import MyPlexAccount
 from config import config
 from logger_service import logger
@@ -19,6 +19,28 @@ def get_section_title(sec: Any) -> str:
         if val and isinstance(val, str):
             return val
     return str(sec)
+
+LIBRARY_ALIASES = {
+    "movies": ["movies", "peliculas", "películas", "cine", "films", "pelicula"],
+    "tv shows": ["tv shows", "tv", "shows", "series", "series de tv", "television", "tele"],
+    "anime": ["anime", "animes"],
+    "sports": ["sports", "deportes"]
+}
+
+def expand_target_libraries(target_libraries: List[str]) -> Set[str]:
+    expanded: Set[str] = set()
+    for lib in target_libraries:
+        norm = normalize_str(lib)
+        expanded.add(norm)
+        if norm in LIBRARY_ALIASES:
+            for alias in LIBRARY_ALIASES[norm]:
+                expanded.add(normalize_str(alias))
+        for key, aliases in LIBRARY_ALIASES.items():
+            if norm in [normalize_str(a) for a in aliases]:
+                expanded.add(normalize_str(key))
+                for a in aliases:
+                    expanded.add(normalize_str(a))
+    return expanded
 
 class PlexService:
     def __init__(self, cfg=config, account: Optional[MyPlexAccount] = None):
@@ -55,10 +77,19 @@ class PlexService:
             return target_resource.connect()
 
     def find_user_by_email(self, email: str):
-        """Finds a Plex user by email, username, or title."""
+        """Finds a Plex user by email, username, title, or email prefix among shared friends."""
         clean_email = normalize_str(email)
+        if not clean_email:
+            return None
+        email_prefix = clean_email.split("@")[0] if "@" in clean_email else clean_email
         account = self.get_account()
-        for u in account.users():
+
+        try:
+            users_list = account.users()
+        except Exception:
+            users_list = []
+
+        for u in users_list:
             user_email = getattr(u, "email", None)
             user_username = getattr(u, "username", None)
             user_title = getattr(u, "title", None)
@@ -69,6 +100,11 @@ class PlexService:
                 return u
             if user_title and normalize_str(user_title) == clean_email:
                 return u
+            if user_username and normalize_str(user_username) == email_prefix:
+                return u
+            if user_title and normalize_str(user_title) == email_prefix:
+                return u
+
         return None
 
     def get_all_shared_users(self) -> List[Dict[str, Any]]:
@@ -186,7 +222,7 @@ class PlexService:
             try:
                 server = self.get_server()
                 all_server_sections = server.library.sections()
-                target_libs_norm = {normalize_str(lib) for lib in target_libraries}
+                target_libs_norm = expand_target_libraries(target_libraries)
 
                 server_name = self.cfg.PLEX_SERVER_NAME
                 user_server = None
@@ -212,25 +248,17 @@ class PlexService:
                     current_sections = all_server_sections
 
                 curr_titles = [get_section_title(sec) for sec in current_sections]
+                all_titles = [get_section_title(sec) for sec in all_server_sections]
                 logger.info(
+                    f"Plex server sections: {all_titles}. "
                     f"User '{clean_email}' currently shared sections: {curr_titles}. "
-                    f"Target libraries to remove: {target_libraries}"
+                    f"Target libraries to remove (expanded): {list(target_libs_norm)}"
                 )
 
                 user_has_target_lib = all_libraries_shared or any(
                     normalize_str(get_section_title(sec)) in target_libs_norm 
                     for sec in current_sections
                 )
-
-                if current_sections and not user_has_target_lib:
-                    logger.info(f"User '{clean_email}' already has target libraries [{', '.join(target_libraries)}] disabled.")
-                    return {
-                        "email": clean_email,
-                        "found": True,
-                        "status": "ALREADY_DISABLED",
-                        "message": f"Libraries [{', '.join(target_libraries)}] already disabled for user.",
-                        "action": "ALREADY_DISABLED"
-                    }
 
                 remaining_sections = []
                 for sec in all_server_sections:
@@ -244,6 +272,18 @@ class PlexService:
                         remaining_sections.append(sec)
 
                 rem_titles = [get_section_title(sec) for sec in remaining_sections]
+
+                # If remaining sections is equal to current sections and user has no target libraries, user is already disabled
+                if set(curr_titles) == set(rem_titles) and not user_has_target_lib:
+                    logger.info(f"User '{clean_email}' already has target libraries [{', '.join(target_libraries)}] disabled.")
+                    return {
+                        "email": clean_email,
+                        "found": True,
+                        "status": "ALREADY_DISABLED",
+                        "message": f"Libraries [{', '.join(target_libraries)}] already disabled for user.",
+                        "action": "ALREADY_DISABLED"
+                    }
+
                 logger.info(f"Updating library access for '{clean_email}'. Remaining sections to share: {rem_titles}")
 
                 if remaining_sections:

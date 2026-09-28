@@ -234,7 +234,11 @@ class GrantService:
         existing_perm = [self._get_pass_email(p) for p in data.get("permanent_passes", [])]
         return clean_email in existing_perm
 
-    def get_expired_temporary_passes(self, reference_time: Optional[datetime] = None) -> List[Dict[str, Any]]:
+    def get_expired_temporary_passes(
+        self,
+        reference_time: Optional[datetime] = None,
+        zoho_service: Optional[Any] = None
+    ) -> List[Dict[str, Any]]:
         """Returns all temporary passes that have passed their `expires_at` timestamp and cleans them up."""
         data = self._load_data()
         now = reference_time or datetime.now()
@@ -246,23 +250,37 @@ class GrantService:
 
         for pass_info in all_passes:
             email = self._get_pass_email(pass_info)
+            customer_id = pass_info.get("customer_id") if isinstance(pass_info, dict) else ""
+            cust_name = pass_info.get("customer_name") if isinstance(pass_info, dict) else ""
+
+            # If email is missing in pass_info but customer_id is present, resolve email from Zoho Books
+            if not email and customer_id and zoho_service:
+                try:
+                    if hasattr(zoho_service, "fetch_contact_email"):
+                        fetched_email = zoho_service.fetch_contact_email(customer_id)
+                        if fetched_email:
+                            email = fetched_email.strip().lower()
+                            logger.info(f"GrantService: Resolved missing email for customer_id '{customer_id}' -> '{email}' via Zoho Books.")
+                except Exception as e:
+                    logger.warning(f"GrantService: Could not resolve email for customer_id '{customer_id}': {e}")
+
             expires_at_raw = self._get_pass_expires_at(pass_info)
             dt_expires = self._parse_datetime(expires_at_raw)
 
-            logger.info(f"GrantService check: email='{email}', expires_at_raw='{expires_at_raw}', parsed={dt_expires}")
+            logger.info(f"GrantService check: email='{email}', customer_id='{customer_id}', expires_at_raw='{expires_at_raw}', parsed={dt_expires}")
 
             if not dt_expires or dt_expires <= now:
                 if email:
-                    cust_name = pass_info.get("customer_name") if isinstance(pass_info, dict) else email
-                    cust_id = pass_info.get("customer_id") if isinstance(pass_info, dict) else ""
-                    logger.info(f"GrantService: Temporary pass for '{email}' is EXPIRED (expires: {expires_at_raw}).")
+                    logger.info(f"GrantService: Temporary pass for '{email}' (Customer: {cust_name}) is EXPIRED (expires: {expires_at_raw}).")
                     expired.append({
                         "email": email,
                         "customer_name": cust_name or email,
-                        "customer_id": cust_id or ""
+                        "customer_id": customer_id or ""
                     })
+                elif customer_id:
+                    logger.warning(f"GrantService: Temporary pass with customer_id '{customer_id}' (name: {cust_name}) is expired but email could not be resolved.")
             else:
-                logger.info(f"GrantService: Temporary pass for '{email}' is still ACTIVE until {expires_at_raw}.")
+                logger.info(f"GrantService: Temporary pass for '{email or customer_id}' is still ACTIVE until {expires_at_raw}.")
                 remaining.append(pass_info)
 
         if expired:

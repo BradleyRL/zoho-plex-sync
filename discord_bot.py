@@ -638,7 +638,7 @@ async def sync(
         grant_service = GrantService()
 
         # STEP 1: Process expired temporary passes
-        expired_passes = grant_service.get_expired_temporary_passes()
+        expired_passes = grant_service.get_expired_temporary_passes(zoho_service=zoho_service)
         expired_processed = []
         today_str = datetime.now().strftime("%Y-%m-%d")
 
