@@ -141,34 +141,25 @@ def update_friend_sections(
             url_v1 = account.FRIENDSERVERS.format(machineId=machine_id, serverId=server_id)
             url_v2 = f"https://plex.tv/api/v2/shared_servers/{server_id}"
             
-            logger.info(f"Revoking library access for '{user_label}' (serverId={server_id}, machineId={machine_id})...")
+            logger.info(f"Revoking all library access for '{user_label}' by setting empty sections (serverId={server_id}, machineId={machine_id})...")
             
             success = False
-            # Attempt 1: v1 DELETE without body
+            # Attempt 1: v1 PUT with empty sections
             try:
-                account.query(url_v1, account._session.delete, headers=headers)
-                logger.info(f"Successfully sent DELETE without body to {url_v1}")
+                account.query(url_v1, account._session.put, json=params, headers=headers)
+                logger.info(f"Successfully sent PUT with empty sections to {url_v1}")
                 success = True
             except Exception as e1:
-                logger.warning(f"DELETE without body to {url_v1} failed ({e1}). Trying with json body...")
+                logger.warning(f"PUT with empty sections to {url_v1} failed ({e1}). Trying v2 endpoint...")
 
-            # Attempt 2: v1 DELETE with json body
+            # Attempt 2: v2 PUT with empty sections
             if not success:
                 try:
-                    account.query(url_v1, account._session.delete, json=params, headers=headers)
-                    logger.info(f"Successfully sent DELETE with json body to {url_v1}")
-                    success = True
-                except Exception as e2:
-                    logger.warning(f"DELETE with json body to {url_v1} failed ({e2}). Trying v2 endpoint...")
-
-            # Attempt 3: v2 DELETE
-            if not success:
-                try:
-                    account.query(url_v2, account._session.delete, headers=headers)
-                    logger.info(f"Successfully sent DELETE to {url_v2}")
+                    account.query(url_v2, account._session.put, json=params, headers=headers)
+                    logger.info(f"Successfully sent PUT with empty sections to {url_v2}")
                     success = True
                 except Exception as e3:
-                    logger.error(f"All DELETE requests to FRIENDSERVERS failed for '{user_label}': {e3}")
+                    logger.error(f"All PUT requests to set empty sections failed for '{user_label}': {e3}")
         else:
             logger.warning(f"Could not find shared server_id for '{user_label}' on machine {machine_id}. Falling back to updateFriend.")
         
