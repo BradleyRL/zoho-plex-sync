@@ -185,9 +185,12 @@ class PlexService:
                         break
 
                 target_libs_norm = {normalize_str(lib) for lib in target_libraries}
-                user_has_target_lib = any(normalize_str(getattr(sec, "title", "")) in target_libs_norm for sec in current_sections)
+                user_has_target_lib = any(
+                    normalize_str(getattr(sec, "title", sec if isinstance(sec, str) else "")) in target_libs_norm 
+                    for sec in current_sections
+                )
 
-                if current_sections and not user_has_target_lib:
+                if not user_has_target_lib:
                     logger.info(f"User '{clean_email}' already has target libraries [{', '.join(target_libraries)}] disabled.")
                     return {
                         "email": clean_email,
@@ -198,16 +201,7 @@ class PlexService:
                     }
 
                 server = self.get_server()
-                all_server_sections = []
-                try:
-                    all_server_sections = server.library.sections()
-                except Exception:
-                    all_server_sections = []
-
                 remaining_titles = [
-                    sec.title for sec in all_server_sections 
-                    if normalize_str(getattr(sec, "title", "")) not in target_libs_norm
-                ] if all_server_sections else [
                     getattr(sec, "title", sec) for sec in current_sections 
                     if normalize_str(getattr(sec, "title", sec if isinstance(sec, str) else "")) not in target_libs_norm
                 ]

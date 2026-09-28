@@ -166,17 +166,38 @@ class GrantService:
         ]
         self._save_data(data)
 
+    @staticmethod
+    def _parse_datetime(val: Any) -> Optional[datetime]:
+        if not val:
+            return None
+        if isinstance(val, datetime):
+            return val
+        val_str = str(val).strip()
+        if not val_str:
+            return None
+        clean_str = val_str.replace("T", " ")
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+            try:
+                return datetime.strptime(clean_str, fmt)
+            except ValueError:
+                pass
+        try:
+            return datetime.fromisoformat(val_str)
+        except ValueError:
+            pass
+        return None
+
     def is_temporary_active(self, email: str, reference_time: Optional[datetime] = None) -> bool:
         """Checks if a user currently has an ACTIVE (unexpired) temporary pass."""
         clean_email = email.strip().lower()
         data = self._load_data()
         now = reference_time or datetime.now()
-        now_str = now.strftime("%Y-%m-%d %H:%M:%S")
 
         for pass_info in data.get("temporary_passes", []):
             if self._get_pass_email(pass_info) == clean_email:
-                expires_at = self._get_pass_expires_at(pass_info)
-                if expires_at and expires_at > now_str:
+                expires_at_raw = self._get_pass_expires_at(pass_info)
+                dt_expires = self._parse_datetime(expires_at_raw)
+                if dt_expires and dt_expires > now:
                     return True
         return False
 
@@ -191,14 +212,14 @@ class GrantService:
         """Returns all temporary passes that have passed their `expires_at` timestamp and cleans them up."""
         data = self._load_data()
         now = reference_time or datetime.now()
-        now_str = now.strftime("%Y-%m-%d %H:%M:%S")
         expired = []
         remaining = []
 
         for pass_info in data.get("temporary_passes", []):
             email = self._get_pass_email(pass_info)
-            expires_at = self._get_pass_expires_at(pass_info)
-            if not expires_at or expires_at <= now_str:
+            expires_at_raw = self._get_pass_expires_at(pass_info)
+            dt_expires = self._parse_datetime(expires_at_raw)
+            if not dt_expires or dt_expires <= now:
                 if email:
                     expired.append({
                         "email": email,
