@@ -17,15 +17,26 @@ def main():
     account = MyPlexAccount(token=config.PLEX_TOKEN)
     
     target_user = None
-    for u in account.users():
-        if (getattr(u, 'email', '') or '').lower() == email or \
-           (getattr(u, 'username', '') or '').lower() == email or \
-           (getattr(u, 'title', '') or '').lower() == email:
+    all_users = account.users()
+    for u in all_users:
+        u_email = (getattr(u, 'email', '') or '').lower()
+        u_username = (getattr(u, 'username', '') or '').lower()
+        u_title = (getattr(u, 'title', '') or '').lower()
+        
+        if u_email == email or u_username == email or u_title == email:
             target_user = u
             break
             
     if not target_user:
-        print(f"Usuario '{email}' no encontrado en la lista de amigos.")
+        print(f"Usuario '{email}' no encontrado buscando por coincidencia exacta.")
+        print("\n--- Lista de todos tus amigos según la API de Plex ---")
+        for idx, u in enumerate(all_users):
+            u_email = getattr(u, 'email', '<Sin Email>')
+            u_username = getattr(u, 'username', '<Sin Username>')
+            u_title = getattr(u, 'title', '<Sin Titulo>')
+            print(f"{idx+1}. Title: '{u_title}' | Username: '{u_username}' | Email: '{u_email}'")
+        
+        print("\nSi el usuario que buscas aparece en la lista de arriba pero con otro nombre o correo, utiliza ESE 'Username' o 'Title' en el comando.")
         return
         
     print(f"Usuario encontrado: {getattr(target_user, 'title', 'Unknown')} ({getattr(target_user, 'email', 'Unknown')})")
