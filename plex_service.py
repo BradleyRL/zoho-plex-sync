@@ -145,7 +145,7 @@ def update_friend_sections(
             success = False
             # Attempt 1: v2 DELETE (Modern API)
             try:
-                account.query(url_v2, account._session.delete)
+                account.query(url_v2, account._session.delete, json=params, headers=headers)
                 logger.info(f"Successfully sent DELETE to {url_v2}")
                 success = True
             except Exception as e1:
@@ -154,7 +154,7 @@ def update_friend_sections(
             # Attempt 2: v1 DELETE (Legacy API)
             if not success:
                 try:
-                    account.query(url_v1, account._session.delete)
+                    account.query(url_v1, account._session.delete, json=params, headers=headers)
                     logger.info(f"Successfully sent DELETE to {url_v1}")
                     success = True
                 except Exception as e3:
