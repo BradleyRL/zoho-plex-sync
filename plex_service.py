@@ -42,6 +42,26 @@ def expand_target_libraries(target_libraries: List[str]) -> Set[str]:
                     expanded.add(normalize_str(a))
     return expanded
 
+def is_section_in_targets(sec_title: str, target_libraries: List[str]) -> bool:
+    """Checks if a Plex section title matches target libraries (exact, alias, substring, or token overlap)."""
+    if not sec_title or not target_libraries:
+        return False
+    sec_norm = normalize_str(sec_title)
+    if not sec_norm:
+        return False
+    target_libs_norm = expand_target_libraries(target_libraries)
+    if sec_norm in target_libs_norm:
+        return True
+    for t_norm in target_libs_norm:
+        if len(t_norm) >= 3 and (t_norm in sec_norm or sec_norm in t_norm):
+            return True
+    sec_tokens = set(sec_norm.split())
+    for t_norm in target_libs_norm:
+        t_tokens = set(t_norm.split())
+        if t_tokens and t_tokens.issubset(sec_tokens):
+            return True
+    return False
+
 def update_friend_sections(
     account: MyPlexAccount,
     user: Any,
@@ -317,15 +337,15 @@ class PlexService:
                 )
 
                 user_has_target_lib = all_libraries_shared or any(
-                    normalize_str(get_section_title(sec)) in target_libs_norm 
+                    is_section_in_targets(get_section_title(sec), target_libraries)
                     for sec in current_sections
                 )
 
                 remaining_sections = []
                 for sec in all_server_sections:
-                    sec_norm = normalize_str(get_section_title(sec))
-                    if sec_norm in target_libs_norm:
+                    if is_section_in_targets(get_section_title(sec), target_libraries):
                         continue
+                    sec_norm = normalize_str(get_section_title(sec))
                     if all_libraries_shared or not user_server or any(
                         normalize_str(get_section_title(c_sec)) == sec_norm 
                         for c_sec in current_sections
@@ -441,10 +461,9 @@ class PlexService:
             target_libraries = self.cfg.PLEX_LIBRARIES
 
             if target_libraries:
-                target_libs_lower = {lib.lower() for lib in target_libraries}
                 sections = [
                     sec for sec in all_sections 
-                    if getattr(sec, "title", "").lower() in target_libs_lower
+                    if is_section_in_targets(get_section_title(sec), target_libraries)
                 ]
                 logger.info(
                     f"Sharing {len(sections)} of {len(all_sections)} section(s) "
