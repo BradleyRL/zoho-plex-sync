@@ -1,8 +1,15 @@
 from __future__ import annotations
+import unicodedata
 from typing import Optional, List, Dict, Any
 from plexapi.myplex import MyPlexAccount
 from config import config
 from logger_service import logger
+
+def normalize_str(s: str) -> str:
+    if not s:
+        return ""
+    nfkd = unicodedata.normalize('NFKD', str(s))
+    return "".join([c for c in nfkd if not unicodedata.combining(c)]).strip().lower()
 
 class PlexService:
     def __init__(self, cfg=config, account: Optional[MyPlexAccount] = None):
@@ -40,18 +47,18 @@ class PlexService:
 
     def find_user_by_email(self, email: str):
         """Finds a Plex user by email, username, or title."""
-        clean_email = email.strip().lower()
+        clean_email = normalize_str(email)
         account = self.get_account()
         for u in account.users():
             user_email = getattr(u, "email", None)
             user_username = getattr(u, "username", None)
             user_title = getattr(u, "title", None)
 
-            if user_email and user_email.strip().lower() == clean_email:
+            if user_email and normalize_str(user_email) == clean_email:
                 return u
-            if user_username and user_username.strip().lower() == clean_email:
+            if user_username and normalize_str(user_username) == clean_email:
                 return u
-            if user_title and user_title.strip().lower() == clean_email:
+            if user_title and normalize_str(user_title) == clean_email:
                 return u
         return None
 
@@ -87,8 +94,9 @@ class PlexService:
     ) -> Dict[str, Any]:
         """
         Revokes or limits Plex library access for a user identified by email address.
+        Cancels pending invitations if unaccepted, or removes/updates shared libraries if accepted.
         If PLEX_LIBRARIES is configured in .env (e.g. Peliculas,Series):
-            Removes only those libraries for the user.
+            Removes only those libraries for the user. If no remaining libraries are left, removes user completely.
         If PLEX_LIBRARIES is empty or "ALL":
             Unshares the user completely from the server/account.
         """
@@ -98,8 +106,15 @@ class PlexService:
         account = self.get_account()
         user_to_modify = self.find_user_by_email(clean_email)
 
-        if not user_to_modify:
-            logger.warning(f"User with email '{clean_email}' not found in Plex shared users list.")
+        # Check for pending invitation if user not found in accepted friends
+        pending_invite = None
+        try:
+            pending_invite = account.pendingInvite(clean_email, includeReceived=False)
+        except Exception:
+            pass
+
+        if not user_to_modify and not pending_invite:
+            logger.warning(f"User with email '{clean_email}' not found in Plex shared users list or pending invites.")
             return {
                 "email": clean_email,
                 "found": False,
@@ -107,6 +122,44 @@ class PlexService:
                 "message": f"User '{clean_email}' not found on Plex server.",
                 "action": "NONE"
             }
+
+        # If user has a pending invite (not yet accepted), cancel the invite
+        if pending_invite and not user_to_modify:
+            if dry_run:
+                logger.info(f"[DRY-RUN] Would cancel pending invitation for '{clean_email}'.")
+                return {
+                    "email": clean_email,
+                    "found": True,
+                    "status": "DRY_RUN",
+                    "message": "[DRY-RUN] Would cancel pending invitation",
+                    "action": "[DRY-RUN] Cancel pending invitation"
+                }
+            try:
+                account.cancelInvite(pending_invite)
+                logger.info(f"Canceled pending invitation for '{clean_email}'.")
+                return {
+                    "email": clean_email,
+                    "found": True,
+                    "status": "SUCCESS",
+                    "message": "Canceled pending invitation on Plex server.",
+                    "action": "Canceled pending invitation"
+                }
+            except Exception as e:
+                logger.error(f"Failed to cancel pending invitation for '{clean_email}': {e}")
+                return {
+                    "email": clean_email,
+                    "found": True,
+                    "status": "FAILED",
+                    "message": str(e),
+                    "action": "ERROR"
+                }
+
+        # If user is active friend and also has a leftover pending invite, clean up pending invite
+        if pending_invite and not dry_run:
+            try:
+                account.cancelInvite(pending_invite)
+            except Exception:
+                pass
 
         # Check if libraries to remove are specified, or if we unshare completely
         if target_libraries:
@@ -131,8 +184,8 @@ class PlexService:
                         current_sections = sec_attr() if callable(sec_attr) else sec_attr
                         break
 
-                target_libs_lower = {lib.lower() for lib in target_libraries}
-                user_has_target_lib = any(getattr(sec, "title", "").lower() in target_libs_lower for sec in current_sections)
+                target_libs_norm = {normalize_str(lib) for lib in target_libraries}
+                user_has_target_lib = any(normalize_str(getattr(sec, "title", "")) in target_libs_norm for sec in current_sections)
 
                 if current_sections and not user_has_target_lib:
                     logger.info(f"User '{clean_email}' already has target libraries [{', '.join(target_libraries)}] disabled.")
@@ -153,12 +206,24 @@ class PlexService:
 
                 remaining_titles = [
                     sec.title for sec in all_server_sections 
-                    if getattr(sec, "title", "").lower() not in target_libs_lower
+                    if normalize_str(getattr(sec, "title", "")) not in target_libs_norm
                 ] if all_server_sections else [
                     getattr(sec, "title", sec) for sec in current_sections 
-                    if getattr(sec, "title", "").lower() not in target_libs_lower
+                    if normalize_str(getattr(sec, "title", sec if isinstance(sec, str) else "")) not in target_libs_norm
                 ]
-                
+
+                # If no remaining titles left (all server sections are revoked), remove friend completely
+                if not remaining_titles:
+                    account.removeFriend(user_to_modify)
+                    logger.info(f"Removed user '{clean_email}' completely from Plex as all libraries were revoked.")
+                    return {
+                        "email": clean_email,
+                        "found": True,
+                        "status": "SUCCESS",
+                        "message": "Removed user completely from Plex server.",
+                        "action": "Unshared user completely from Plex server"
+                    }
+
                 account.updateFriend(user=user_to_modify, server=server, sections=remaining_titles)
 
                 logger.info(f"Successfully updated library access for user '{clean_email}'.")

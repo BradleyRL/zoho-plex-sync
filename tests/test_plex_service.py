@@ -42,12 +42,27 @@ def test_revoke_user_access_dry_run():
 def test_revoke_user_access_not_found():
     mock_account = MagicMock()
     mock_account.users.return_value = []
+    mock_account.pendingInvite.side_effect = Exception("NotFound")
 
     service = PlexService(account=mock_account)
     res = service.revoke_user_access("unknown@example.com")
 
     assert res["found"] is False
     assert res["status"] == "NOT_FOUND"
+
+def test_revoke_user_access_pending_invite():
+    mock_account = MagicMock()
+    mock_account.users.return_value = []
+    mock_invite = MagicMock()
+    mock_account.pendingInvite.return_value = mock_invite
+
+    service = PlexService(account=mock_account)
+    res = service.revoke_user_access("pending@example.com")
+
+    assert res["found"] is True
+    assert res["status"] == "SUCCESS"
+    assert res["action"] == "Canceled pending invitation"
+    mock_account.cancelInvite.assert_called_once_with(mock_invite)
 
 def test_revoke_user_access_complete_unshare():
     mock_cfg = MagicMock()
