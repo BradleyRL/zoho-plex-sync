@@ -212,18 +212,6 @@ class PlexService:
                     if normalize_str(getattr(sec, "title", sec if isinstance(sec, str) else "")) not in target_libs_norm
                 ]
 
-                # If no remaining titles left (all server sections are revoked), remove friend completely
-                if not remaining_titles:
-                    account.removeFriend(user_to_modify)
-                    logger.info(f"Removed user '{clean_email}' completely from Plex as all libraries were revoked.")
-                    return {
-                        "email": clean_email,
-                        "found": True,
-                        "status": "SUCCESS",
-                        "message": "Removed user completely from Plex server.",
-                        "action": "Unshared user completely from Plex server"
-                    }
-
                 account.updateFriend(user=user_to_modify, server=server, sections=remaining_titles)
 
                 logger.info(f"Successfully updated library access for user '{clean_email}'.")
@@ -244,30 +232,31 @@ class PlexService:
                     "action": "ERROR"
                 }
         else:
-            # Full unshare / revocation
-            action_desc = "Unshared user completely from Plex server"
+            # Full revocation / empty sections via updateFriend
+            action_desc = "Revoked library access on Plex server"
             if dry_run:
-                logger.info(f"[DRY-RUN] Would completely unshare user '{clean_email}' from Plex.")
+                logger.info(f"[DRY-RUN] Would update library access (empty sections) for '{clean_email}'.")
                 return {
                     "email": clean_email,
                     "found": True,
                     "status": "DRY_RUN",
-                    "message": "[DRY-RUN] Would unshare user completely",
+                    "message": "[DRY-RUN] Would update library access",
                     "action": action_desc
                 }
 
             try:
-                account.removeFriend(user_to_modify)
-                logger.info(f"Successfully unshared/removed user '{clean_email}' from Plex.")
+                server = self.get_server()
+                account.updateFriend(user=user_to_modify, server=server, sections=[])
+                logger.info(f"Successfully updated library access (empty sections) for user '{clean_email}'.")
                 return {
                     "email": clean_email,
                     "found": True,
                     "status": "SUCCESS",
-                    "message": "Unshared user completely from Plex server.",
-                    "action": "Unshared user completely from Plex server"
+                    "message": "Updated library access (empty sections).",
+                    "action": action_desc
                 }
             except Exception as e:
-                logger.error(f"Failed to unshare user '{clean_email}' from Plex: {e}")
+                logger.error(f"Failed to update library access for user '{clean_email}': {e}")
                 return {
                     "email": clean_email,
                     "found": True,

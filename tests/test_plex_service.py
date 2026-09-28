@@ -67,18 +67,26 @@ def test_revoke_user_access_pending_invite():
 def test_revoke_user_access_complete_unshare():
     mock_cfg = MagicMock()
     mock_cfg.PLEX_LIBRARIES = []
+    mock_cfg.PLEX_SERVER_NAME = ""
     
     mock_account = MagicMock()
+    mock_server = MagicMock()
     user = MagicMock()
     user.email = "bob@example.com"
     mock_account.users.return_value = [user]
+
+    resource = MagicMock()
+    resource.provides = "server"
+    resource.owned = True
+    resource.connect.return_value = mock_server
+    mock_account.resources.return_value = [resource]
 
     service = PlexService(cfg=mock_cfg, account=mock_account)
     res = service.revoke_user_access("bob@example.com", dry_run=False)
 
     assert res["found"] is True
     assert res["status"] == "SUCCESS"
-    mock_account.removeFriend.assert_called_once_with(user)
+    mock_account.updateFriend.assert_called_once_with(user=user, server=mock_server, sections=[])
 
 def test_revoke_user_access_update_libraries():
     mock_cfg = MagicMock()
