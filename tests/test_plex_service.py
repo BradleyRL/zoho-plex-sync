@@ -97,9 +97,17 @@ def test_revoke_user_access_update_libraries():
     mock_server = MagicMock()
     mock_account.server.return_value = mock_server
 
+    sec1 = MagicMock()
+    sec1.title = "Movies"
+    sec2 = MagicMock()
+    sec2.title = "TV Shows"
+    mock_server.library.sections.return_value = [sec1, sec2]
+
     user = MagicMock()
     user.email = "carol@example.com"
     server_entry = MagicMock()
+    server_entry.name = "HomeServer"
+    server_entry.allLibraries = False
     sec1_user = MagicMock()
     sec1_user.title = "Movies"
     sec2_user = MagicMock()
@@ -113,7 +121,7 @@ def test_revoke_user_access_update_libraries():
 
     assert res["found"] is True
     assert res["status"] == "SUCCESS"
-    mock_account.updateFriend.assert_called_once_with(user=user, server=mock_server, sections=["TV Shows"])
+    mock_account.updateFriend.assert_called_once_with(user=user, server=mock_server, sections=[sec2])
 
 def test_revoke_user_access_removes_sole_target_library():
     mock_cfg = MagicMock()
@@ -124,9 +132,17 @@ def test_revoke_user_access_removes_sole_target_library():
     mock_server = MagicMock()
     mock_account.server.return_value = mock_server
 
+    sec1 = MagicMock()
+    sec1.title = "Movies"
+    sec2 = MagicMock()
+    sec2.title = "TV Shows"
+    mock_server.library.sections.return_value = [sec1, sec2]
+
     user = MagicMock()
     user.email = "dave@example.com"
     server_entry = MagicMock()
+    server_entry.name = "HomeServer"
+    server_entry.allLibraries = False
     sec1_user = MagicMock()
     sec1_user.title = "Movies"
     server_entry.sections.return_value = [sec1_user]
@@ -138,7 +154,7 @@ def test_revoke_user_access_removes_sole_target_library():
 
     assert res["found"] is True
     assert res["status"] == "SUCCESS"
-    mock_account.updateFriend.assert_called_once_with(user=user, server=mock_server, sections=[])
+    mock_account.updateFriend.assert_called_once_with(user=user, server=mock_server, removeSections=True)
 
 def test_revoke_user_access_already_disabled():
     mock_cfg = MagicMock()

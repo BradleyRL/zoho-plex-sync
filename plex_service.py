@@ -175,22 +175,39 @@ class PlexService:
                 }
             
             try:
+                server = self.get_server()
+                all_server_sections = server.library.sections()
+                target_libs_norm = {normalize_str(lib) for lib in target_libraries}
+
                 server_name = self.cfg.PLEX_SERVER_NAME
-                current_sections = []
+                user_server = None
                 for s in getattr(user_to_modify, "servers", []):
                     s_name = getattr(s, "name", None)
-                    if not server_name or not s_name or not isinstance(s_name, str) or s_name.lower() == server_name.lower():
-                        sec_attr = getattr(s, "sections", [])
-                        current_sections = sec_attr() if callable(sec_attr) else sec_attr
+                    s_m_id = getattr(s, "machineIdentifier", None)
+                    if (server_name and s_name and isinstance(s_name, str) and s_name.lower() == server_name.lower()) or \
+                       (hasattr(server, "machineIdentifier") and s_m_id == server.machineIdentifier) or \
+                       not server_name:
+                        user_server = s
                         break
 
-                target_libs_norm = {normalize_str(lib) for lib in target_libraries}
+                current_sections = []
+                all_libraries_shared = False
+                if user_server:
+                    all_libraries_shared = getattr(user_server, "allLibraries", False)
+                    if all_libraries_shared:
+                        current_sections = all_server_sections
+                    else:
+                        sec_attr = getattr(user_server, "sections", [])
+                        current_sections = sec_attr() if callable(sec_attr) else sec_attr
+                else:
+                    current_sections = all_server_sections
+
                 user_has_target_lib = any(
                     normalize_str(getattr(sec, "title", sec if isinstance(sec, str) else "")) in target_libs_norm 
                     for sec in current_sections
                 )
 
-                if not user_has_target_lib:
+                if current_sections and not user_has_target_lib:
                     logger.info(f"User '{clean_email}' already has target libraries [{', '.join(target_libraries)}] disabled.")
                     return {
                         "email": clean_email,
@@ -200,13 +217,21 @@ class PlexService:
                         "action": "ALREADY_DISABLED"
                     }
 
-                server = self.get_server()
-                remaining_titles = [
-                    getattr(sec, "title", sec) for sec in current_sections 
-                    if normalize_str(getattr(sec, "title", sec if isinstance(sec, str) else "")) not in target_libs_norm
-                ]
+                remaining_sections = []
+                for sec in all_server_sections:
+                    sec_norm = normalize_str(getattr(sec, "title", sec if isinstance(sec, str) else ""))
+                    if sec_norm in target_libs_norm:
+                        continue
+                    if all_libraries_shared or not user_server or any(
+                        normalize_str(getattr(c_sec, "title", c_sec if isinstance(c_sec, str) else "")) == sec_norm 
+                        for c_sec in current_sections
+                    ):
+                        remaining_sections.append(sec)
 
-                account.updateFriend(user=user_to_modify, server=server, sections=remaining_titles)
+                if remaining_sections:
+                    account.updateFriend(user=user_to_modify, server=server, sections=remaining_sections)
+                else:
+                    account.updateFriend(user=user_to_modify, server=server, removeSections=True)
 
                 logger.info(f"Successfully updated library access for user '{clean_email}'.")
                 return {
