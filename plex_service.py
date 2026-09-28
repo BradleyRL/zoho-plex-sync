@@ -70,9 +70,10 @@ def update_friend_sections(
     remove_sections: bool = False
 ) -> None:
     """
-    Updates or removes library section access for a friend on a server.
+    Updates library section access for a friend on a server.
     Fixes a bug in plexapi.MyPlexAccount.updateFriend where setting empty sections ([])
     or removeSections=True for an existing friend silently fails without sending API requests.
+    Sends PUT with library_section_ids=[] so the user remains a friend on Plex with 0 libraries shared.
     """
     if isinstance(user, MyPlexUser) or hasattr(user, "servers") or hasattr(user, "email") or hasattr(user, "username"):
         user_obj = user
@@ -84,24 +85,20 @@ def update_friend_sections(
     user_servers = [s for s in getattr(user_obj, "servers", []) if getattr(s, "machineIdentifier", None) == machine_id]
 
     if remove_sections or not sections:
-        # Wants to remove all library sections for this server
+        # User keeps friend status, but section access for this server is set to [] (0 libraries)
         if user_servers:
             server_id = getattr(user_servers[0], "id", None)
             if server_id and hasattr(account, "FRIENDSERVERS") and hasattr(account, "query") and hasattr(account, "_session"):
                 params = {'server_id': machine_id, 'shared_server': {'library_section_ids': []}}
                 url = account.FRIENDSERVERS.format(machineId=machine_id, serverId=server_id)
                 user_label = getattr(user_obj, 'email', getattr(user_obj, 'title', str(user_obj)))
-                logger.info(f"Sending DELETE request to Plex serverId={server_id} to revoke access for '{user_label}'...")
+                logger.info(f"Sending PUT request to Plex serverId={server_id} with library_section_ids=[] to unshare libraries for '{user_label}'...")
                 try:
-                    account.query(url, account._session.delete, json=params, headers=headers)
+                    account.query(url, account._session.put, json=params, headers=headers)
                 except Exception as e:
-                    logger.warning(f"DELETE to FRIENDSERVERS failed ({e}), trying PUT with empty library_section_ids...")
-                    try:
-                        account.query(url, account._session.put, json=params, headers=headers)
-                    except Exception as e_put:
-                        logger.warning(f"PUT to FRIENDSERVERS also failed ({e_put}).")
+                    logger.warning(f"PUT to FRIENDSERVERS failed ({e}).")
         
-        # Always invoke updateFriend as well for mock tracking and standard plexapi cleanup
+        # Always invoke updateFriend for mock tracking/plexapi internal state if needed
         try:
             account.updateFriend(user=user_obj, server=server, removeSections=True)
         except Exception:

@@ -274,10 +274,10 @@ def test_update_friend_sections_direct_api_call():
         remove_sections=True
     )
     
-    # Verify direct DELETE query call to FRIENDSERVERS endpoint was made
+    # Verify direct PUT query call to FRIENDSERVERS endpoint was made with empty library_section_ids
     mock_account.query.assert_called_once_with(
         "https://plex.tv/api/servers/machine123/shared_servers/999",
-        mock_account._session.delete,
+        mock_account._session.put,
         json={'server_id': 'machine123', 'shared_server': {'library_section_ids': []}},
         headers={'Content-Type': 'application/json'}
     )
