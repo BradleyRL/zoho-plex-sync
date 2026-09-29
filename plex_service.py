@@ -170,18 +170,34 @@ def update_friend_sections(
             pass
     else:
         # Non-empty sections list
+        section_ids = account._getSectionIds(machine_id, sections) if hasattr(account, "_getSectionIds") else []
+        params = {
+            'server_id': machine_id, 
+            'shared_server': {
+                'library_section_ids': section_ids,
+                'all_libraries': 0
+            }
+        }
         if server_id and hasattr(account, "FRIENDSERVERS") and hasattr(account, "query") and hasattr(account, "_session"):
-            section_ids = account._getSectionIds(machine_id, sections) if hasattr(account, "_getSectionIds") else []
-            if section_ids:
-                params = {'server_id': machine_id, 'shared_server': {'library_section_ids': section_ids}}
-                url = account.FRIENDSERVERS.format(machineId=machine_id, serverId=server_id)
-                logger.info(f"Sending PUT request to Plex serverId={server_id} with section_ids={section_ids} for '{user_label}'...")
+            url = account.FRIENDSERVERS.format(machineId=machine_id, serverId=server_id)
+            logger.info(f"Sending PUT request to Plex serverId={server_id} with section_ids={section_ids} (all_libraries=0) for '{user_label}'...")
+            try:
+                account.query(url, account._session.put, json=params, headers=headers)
+            except Exception as e:
+                logger.warning(f"Direct PUT to FRIENDSERVERS failed ({e}), falling back to updateFriend.")
+                account.updateFriend(user=user_obj, server=server, sections=sections)
+        else:
+            if hasattr(account, "FRIENDINVITE") and hasattr(user_obj, "id"):
+                params['shared_server']['invited_id'] = user_obj.id
+                url = account.FRIENDINVITE.format(machineId=machine_id)
+                logger.info(f"Sending POST request to Plex FRIENDINVITE to recreate server access with section_ids={section_ids} (all_libraries=0) for '{user_label}'...")
                 try:
-                    account.query(url, account._session.put, json=params, headers=headers)
+                    account.query(url, account._session.post, json=params, headers=headers)
                 except Exception as e:
-                    logger.warning(f"Direct PUT to FRIENDSERVERS failed ({e}), falling back to updateFriend.")
-
-        account.updateFriend(user=user_obj, server=server, sections=sections)
+                    logger.warning(f"Direct POST to FRIENDINVITE failed ({e}), falling back to updateFriend.")
+                    account.updateFriend(user=user_obj, server=server, sections=sections)
+            else:
+                account.updateFriend(user=user_obj, server=server, sections=sections)
 
 class PlexService:
     def __init__(self, cfg=config, account: Optional[MyPlexAccount] = None):
@@ -536,10 +552,10 @@ class PlexService:
             existing_user = self.find_user_by_email(clean_email)
             if existing_user:
                 try:
-                    account.updateFriend(user=existing_user, server=server, sections=sections)
+                    update_friend_sections(account=account, user=existing_user, server=server, sections=sections)
                     logger.info(f"Successfully updated library access for existing Plex user '{clean_email}'.")
                 except Exception as e_up:
-                    logger.warning(f"Could not updateFriend for '{clean_email}', retrying inviteFriend: {e_up}")
+                    logger.warning(f"Could not update_friend_sections for '{clean_email}', retrying inviteFriend: {e_up}")
                     account.inviteFriend(user=clean_email, server=server, sections=sections)
             else:
                 account.inviteFriend(user=clean_email, server=server, sections=sections)
