@@ -363,151 +363,46 @@ class PlexService:
             except Exception:
                 pass
 
-        # Check if libraries to remove are specified, or if we unshare completely
-        if target_libraries:
-            action_desc = f"Removed libraries [{', '.join(target_libraries)}]"
-            if dry_run:
-                logger.info(f"[DRY-RUN] Would update library access for '{clean_email}', removing [{', '.join(target_libraries)}].")
-                return {
-                    "email": clean_email,
-                    "found": True,
-                    "status": "DRY_RUN",
-                    "message": f"[DRY-RUN] Would remove libraries [{', '.join(target_libraries)}]",
-                    "action": f"[DRY-RUN] {action_desc}"
-                }
-            
-            try:
-                server = self.get_server()
-                all_server_sections = server.library.sections()
-                target_libs_norm = expand_target_libraries(target_libraries)
+        # Full revocation / empty sections via updateFriend
+        # Always remove all libraries regardless of PLEX_LIBRARIES env setting
+        action_desc = "Revoked library access on Plex server"
+        if dry_run:
+            logger.info(f"[DRY-RUN] Would update library access (empty sections) for '{clean_email}'.")
+            return {
+                "email": clean_email,
+                "found": True,
+                "status": "DRY_RUN",
+                "message": "[DRY-RUN] Would update library access",
+                "action": action_desc
+            }
 
-                server_name = self.cfg.PLEX_SERVER_NAME
-                user_server = None
-                for s in getattr(user_to_modify, "servers", []):
-                    s_name = getattr(s, "name", None)
-                    s_m_id = getattr(s, "machineIdentifier", None)
-                    if (server_name and s_name and isinstance(s_name, str) and s_name.lower() == server_name.lower()) or \
-                       (hasattr(server, "machineIdentifier") and s_m_id == server.machineIdentifier) or \
-                       not server_name:
-                        user_server = s
-                        break
-
-                current_sections = []
-                all_libraries_shared = False
-                if user_server:
-                    all_libraries_shared = getattr(user_server, "allLibraries", False)
-                    if all_libraries_shared:
-                        current_sections = all_server_sections
-                    else:
-                        sec_attr = getattr(user_server, "sections", [])
-                        current_sections = sec_attr() if callable(sec_attr) else sec_attr
-                else:
-                    current_sections = all_server_sections
-
-                curr_titles = [get_section_title(sec) for sec in current_sections]
-                all_titles = [get_section_title(sec) for sec in all_server_sections]
-                logger.info(
-                    f"Plex server sections: {all_titles}. "
-                    f"User '{clean_email}' currently shared sections: {curr_titles}. "
-                    f"Target libraries to remove (expanded): {list(target_libs_norm)}"
-                )
-
-                user_has_target_lib = all_libraries_shared or any(
-                    is_section_in_targets(get_section_title(sec), target_libraries)
-                    for sec in current_sections
-                )
-
-                remaining_sections = []
-                for sec in all_server_sections:
-                    if is_section_in_targets(get_section_title(sec), target_libraries):
-                        continue
-                    sec_norm = normalize_str(get_section_title(sec))
-                    if all_libraries_shared or not user_server or any(
-                        normalize_str(get_section_title(c_sec)) == sec_norm 
-                        for c_sec in current_sections
-                    ):
-                        remaining_sections.append(sec)
-
-                rem_titles = [get_section_title(sec) for sec in remaining_sections]
-
-                # If remaining sections is equal to current sections and user has no target libraries, user is already disabled
-                if set(curr_titles) == set(rem_titles) and not user_has_target_lib:
-                    logger.info(f"User '{clean_email}' already has target libraries [{', '.join(target_libraries)}] disabled.")
-                    return {
-                        "email": clean_email,
-                        "found": True,
-                        "status": "ALREADY_DISABLED",
-                        "message": f"Libraries [{', '.join(target_libraries)}] already disabled for user.",
-                        "action": "ALREADY_DISABLED"
-                    }
-
-                logger.info(f"Updating library access for '{clean_email}'. Remaining sections to share: {rem_titles}")
-
-                update_friend_sections(
-                    account=account,
-                    user=user_to_modify,
-                    server=server,
-                    sections=remaining_sections,
-                    remove_sections=(len(remaining_sections) == 0)
-                )
-
-                logger.info(f"Successfully updated library access for user '{clean_email}'.")
-                return {
-                    "email": clean_email,
-                    "found": True,
-                    "status": "SUCCESS",
-                    "message": f"Updated library access, removed [{', '.join(target_libraries)}]",
-                    "action": action_desc
-                }
-            except Exception as e:
-                logger.error(f"Failed to update library access for user '{clean_email}': {e}")
-                return {
-                    "email": clean_email,
-                    "found": True,
-                    "status": "FAILED",
-                    "message": str(e),
-                    "action": "ERROR"
-                }
-        else:
-            # Full revocation / empty sections via updateFriend
-            action_desc = "Revoked library access on Plex server"
-            if dry_run:
-                logger.info(f"[DRY-RUN] Would update library access (empty sections) for '{clean_email}'.")
-                return {
-                    "email": clean_email,
-                    "found": True,
-                    "status": "DRY_RUN",
-                    "message": "[DRY-RUN] Would update library access",
-                    "action": action_desc
-                }
-
-            try:
-                server = self.get_server()
-                logger.info(f"Revoking all library access (removeSections=True) for user '{clean_email}'.")
-                update_friend_sections(
-                    account=account,
-                    user=user_to_modify,
-                    server=server,
-                    sections=[],
-                    remove_sections=True
-                )
-                logger.info(f"Successfully updated library access (empty sections) for user '{clean_email}'.")
-                return {
-                    "email": clean_email,
-                    "found": True,
-                    "status": "SUCCESS",
-                    "message": "Updated library access (empty sections).",
-                    "action": action_desc
-                }
-            except Exception as e:
-                logger.error(f"Failed to update library access for user '{clean_email}': {e}")
-                return {
-                    "email": clean_email,
-                    "found": True,
-                    "status": "FAILED",
-                    "message": str(e),
-                    "action": "ERROR"
-                }
+        try:
+            server = self.get_server()
+            logger.info(f"Revoking all library access (removeSections=True) for user '{clean_email}'.")
+            update_friend_sections(
+                account=account,
+                user=user_to_modify,
+                server=server,
+                sections=[],
+                remove_sections=True
+            )
+            logger.info(f"Successfully updated library access (empty sections) for user '{clean_email}'.")
+            return {
+                "email": clean_email,
+                "found": True,
+                "status": "SUCCESS",
+                "message": "Updated library access (empty sections).",
+                "action": action_desc
+            }
+        except Exception as e:
+            logger.error(f"Failed to update library access for user '{clean_email}': {e}")
+            return {
+                "email": clean_email,
+                "found": True,
+                "status": "FAILED",
+                "message": str(e),
+                "action": "ERROR"
+            }
 
     def grant_user_access(
         self,
