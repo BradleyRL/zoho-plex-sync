@@ -43,24 +43,14 @@ def expand_target_libraries(target_libraries: List[str]) -> Set[str]:
     return expanded
 
 def is_section_in_targets(sec_title: str, target_libraries: List[str]) -> bool:
-    """Checks if a Plex section title matches target libraries (exact, alias, substring, or token overlap)."""
+    """Checks if a Plex section title matches target libraries (exact or alias)."""
     if not sec_title or not target_libraries:
         return False
     sec_norm = normalize_str(sec_title)
     if not sec_norm:
         return False
     target_libs_norm = expand_target_libraries(target_libraries)
-    if sec_norm in target_libs_norm:
-        return True
-    for t_norm in target_libs_norm:
-        if len(t_norm) >= 3 and (t_norm in sec_norm or sec_norm in t_norm):
-            return True
-    sec_tokens = set(sec_norm.split())
-    for t_norm in target_libs_norm:
-        t_tokens = set(t_norm.split())
-        if t_tokens and t_tokens.issubset(sec_tokens):
-            return True
-    return False
+    return sec_norm in target_libs_norm
 
 def get_shared_server_id(account: MyPlexAccount, user_obj: Any, machine_id: str) -> Optional[int]:
     """Finds the shared server ID (serverId) for a user on a given server machine_id."""
