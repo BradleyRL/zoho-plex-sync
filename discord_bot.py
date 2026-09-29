@@ -853,6 +853,129 @@ async def check_config(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
+@bot.tree.command(name="check_user_libraries", description="Verifica las librerías a las que tiene acceso un usuario en Plex")
+@app_commands.describe(
+    email="Correo o username del usuario en Plex",
+)
+async def check_user_libraries_cmd(interaction: discord.Interaction, email: str):
+    user_id = interaction.user.id
+    if user_id not in config.DISCORD_ALLOWED_USERS:
+        unauth_embed = discord.Embed(
+            title="🚫 Acceso Denegado",
+            description=f"No tienes permiso para ejecutar comandos.",
+            color=discord.Color.red()
+        )
+        await interaction.response.send_message(embed=unauth_embed, ephemeral=True)
+        return
+
+    await interaction.response.defer(ephemeral=False)
+    
+    def _execute():
+        email_lower = email.strip().lower()
+        if not config.PLEX_TOKEN:
+            return {"error": "Error: PLEX_TOKEN falta en .env"}
+        
+        try:
+            from plexapi.myplex import MyPlexAccount
+            account = MyPlexAccount(token=config.PLEX_TOKEN)
+            
+            target_user = None
+            all_users = account.users()
+            for u in all_users:
+                u_email = (getattr(u, 'email', '') or '').lower()
+                u_username = (getattr(u, 'username', '') or '').lower()
+                u_title = (getattr(u, 'title', '') or '').lower()
+                
+                if u_email == email_lower or u_username == email_lower or u_title == email_lower:
+                    target_user = u
+                    break
+                    
+            if not target_user:
+                users_list = []
+                for idx, u in enumerate(all_users):
+                    u_email = getattr(u, 'email', '<Sin Email>')
+                    u_username = getattr(u, 'username', '<Sin Username>')
+                    u_title = getattr(u, 'title', '<Sin Titulo>')
+                    users_list.append(f"{idx+1}. Title: '{u_title}' | Username: '{u_username}' | Email: '{u_email}'")
+                
+                return {
+                    "error": f"Usuario '{email}' no encontrado buscando por coincidencia exacta.",
+                    "users_list": users_list
+                }
+                
+            servers = getattr(target_user, 'servers', [])
+            if not servers:
+                return {
+                    "user_title": getattr(target_user, 'title', 'Unknown'),
+                    "user_email": getattr(target_user, 'email', 'Unknown'),
+                    "servers_info": []
+                }
+                
+            servers_info = []
+            for s in servers:
+                s_name = getattr(s, 'name', 'Unknown')
+                s_id = getattr(s, 'id', '')
+                all_libs = getattr(s, 'allLibraries', False)
+                sections = getattr(s, 'sections', [])
+                if callable(sections):
+                    sections = sections()
+                
+                lib_list = []
+                for sec in sections:
+                    lib_list.append(f"- {getattr(sec, 'title', 'Unknown')} (ID: {getattr(sec, 'id', 'Unknown')})")
+                
+                servers_info.append({
+                    "name": s_name,
+                    "id": s_id,
+                    "all_libs": all_libs,
+                    "libs": lib_list
+                })
+                
+            return {
+                "user_title": getattr(target_user, 'title', 'Unknown'),
+                "user_email": getattr(target_user, 'email', 'Unknown'),
+                "servers_info": servers_info
+            }
+        except Exception as e:
+            return {"error": f"Error de conexión a Plex: {e}"}
+
+    data = await run_in_thread(_execute)
+
+    if "error" in data:
+        desc = data["error"]
+        if "users_list" in data:
+            desc += "\n\n**Lista de tus amigos:**\n```text\n" + "\n".join(data["users_list"][:15])
+            if len(data["users_list"]) > 15:
+                desc += f"\n... y {len(data['users_list']) - 15} más"
+            desc += "\n```"
+            
+        embed = discord.Embed(
+            title="❌ Error al verificar librerías",
+            description=desc,
+            color=discord.Color.red()
+        )
+        await interaction.followup.send(embed=embed)
+        return
+
+    embed = discord.Embed(
+        title="📊 Verificación de Librerías en Plex",
+        description=f"Usuario: **{data['user_title']}** ({data['user_email']})",
+        color=discord.Color.blue()
+    )
+    
+    servers_info = data["servers_info"]
+    if not servers_info:
+        embed.add_field(name="Servidores", value="El usuario tiene 0 servidores compartidos (No tiene acceso a ninguna librería).", inline=False)
+    else:
+        embed.add_field(name="Servidores compartidos", value=str(len(servers_info)), inline=False)
+        for s_info in servers_info:
+            libs = "\n".join(s_info['libs']) if s_info['libs'] else "Ninguna específica"
+            val = f"**ID:** {s_info['id']}\n**Todas las librerías:** {s_info['all_libs']}\n**Librerías (x{len(s_info['libs'])}):**\n{libs}"
+            embed.add_field(name=f"Servidor: {s_info['name']}", value=val, inline=False)
+
+    await interaction.followup.send(embed=embed)
+
+
 @bot.tree.command(name="help", description="Muestra la ayuda y lista de comandos disponibles")
 async def help_command(interaction: discord.Interaction):
     unauth_embed = check_auth_or_embed(interaction)
@@ -898,6 +1021,11 @@ async def help_command(interaction: discord.Interaction):
     embed.add_field(
         name="/sync `[dry_run]` `[threshold]`",
         value="Ejecutar el proceso diario de sincronización manualmente.",
+        inline=False
+    )
+    embed.add_field(
+        name="/check_user_libraries `email`",
+        value="Verifica las librerías de Plex a las que tiene acceso un usuario.",
         inline=False
     )
     embed.add_field(
