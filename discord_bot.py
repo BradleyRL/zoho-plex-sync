@@ -888,16 +888,8 @@ async def check_user_libraries_cmd(interaction: discord.Interaction, email: str)
                     break
                     
             if not target_user:
-                users_list = []
-                for idx, u in enumerate(all_users):
-                    u_email = getattr(u, 'email', '<Sin Email>')
-                    u_username = getattr(u, 'username', '<Sin Username>')
-                    u_title = getattr(u, 'title', '<Sin Titulo>')
-                    users_list.append(f"{idx+1}. Title: '{u_title}' | Username: '{u_username}' | Email: '{u_email}'")
-                
                 return {
-                    "error": f"Usuario '{email}' no encontrado buscando por coincidencia exacta.",
-                    "users_list": users_list
+                    "error": f"Usuario '{email}' no encontrado buscando por coincidencia exacta."
                 }
                 
             servers = getattr(target_user, 'servers', [])
@@ -940,11 +932,6 @@ async def check_user_libraries_cmd(interaction: discord.Interaction, email: str)
 
     if "error" in data:
         desc = data["error"]
-        if "users_list" in data:
-            desc += "\n\n**Lista de tus amigos:**\n```text\n" + "\n".join(data["users_list"][:15])
-            if len(data["users_list"]) > 15:
-                desc += f"\n... y {len(data['users_list']) - 15} más"
-            desc += "\n```"
             
         embed = discord.Embed(
             title="❌ Error al verificar librerías",
