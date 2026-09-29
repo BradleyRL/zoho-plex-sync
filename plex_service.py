@@ -175,7 +175,7 @@ def update_friend_sections(
             'server_id': machine_id, 
             'shared_server': {
                 'library_section_ids': section_ids,
-                'all_libraries': 0
+                'all_libraries': False
             }
         }
         if server_id and hasattr(account, "FRIENDSERVERS") and hasattr(account, "query") and hasattr(account, "_session"):
