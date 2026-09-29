@@ -206,7 +206,7 @@ def handle_grant_permanent(
                 logger.error(f"Failed to create recurring invoice in Zoho Books: {e}")
                 sys.exit(1)
 
-    grant_service.add_permanent_pass(email=email)
+
     result = plex_service.grant_user_access(email=email, dry_run=dry_run)
 
     log_disabled_user(
@@ -251,14 +251,11 @@ def handle_list_inactive_plex(zoho_service: ZohoBooksService, plex_service: Plex
             (title and title.lower() in active_emails)
         )
 
-        has_perm_pass = grant_service.is_permanently_allowed(email) if email else False
         has_temp_pass = grant_service.is_temporary_active(email) if email else False
 
         if not is_active_in_zoho:
             reason = "No active recurring invoice in Zoho Books"
-            if has_perm_pass:
-                reason += " (Has PERMANENT pass)"
-            elif has_temp_pass:
+            if has_temp_pass:
                 reason += " (Has ACTIVE temporary pass)"
 
             inactive_plex_users.append({

@@ -305,7 +305,7 @@ async def grant_permanent(
                 except Exception as e:
                     return {"error": f"Error al crear factura recurrente en Zoho Books: {e}"}
 
-        grant_service.add_permanent_pass(email=email)
+
         result = plex_service.grant_user_access(email=email, dry_run=dry_run)
 
         log_disabled_user(
@@ -468,14 +468,11 @@ async def list_inactive_plex(interaction: discord.Interaction):
                 (title and title.lower() in active_emails)
             )
 
-            has_perm_pass = grant_service.is_permanently_allowed(email) if email else False
             has_temp_pass = grant_service.is_temporary_active(email) if email else False
 
             if not is_active_in_zoho:
                 reason = "Sin factura recurrente activa"
-                if has_perm_pass:
-                    reason += " (Pase PERMANENTE)"
-                elif has_temp_pass:
+                if has_temp_pass:
                     reason += " (Pase TEMPORAL activo)"
 
                 inactive_plex_users.append({

@@ -18,7 +18,7 @@ class GrantService:
         """Creates data directory and grants.json if they do not exist."""
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         if not self.file_path.exists():
-            initial_data = {"temporary_passes": [], "permanent_passes": []}
+            initial_data = {"temporary_passes": []}
             with open(self.file_path, "w", encoding="utf-8") as f:
                 json.dump(initial_data, f, indent=2)
 
@@ -145,28 +145,7 @@ class GrantService:
         logger.info(f"Granted temporary pass to '{clean_email}' ({effective_days} days, expires: {expires_at}).")
         return new_pass
 
-    def add_permanent_pass(self, email: str) -> Dict[str, Any]:
-        """
-        Opción 3: Grants a permanent pass to an email address.
-        """
-        clean_email = email.strip().lower()
-        created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        data = self._load_data()
-        
-        # Remove any existing temp pass for this email
-        data["temporary_passes"] = [
-            p for p in data.get("temporary_passes", []) 
-            if self._get_pass_email(p) != clean_email
-        ]
-
-        existing_perm = [self._get_pass_email(p) for p in data.get("permanent_passes", [])]
-        if clean_email not in existing_perm:
-            data["permanent_passes"].append(clean_email)
-            self._save_data(data)
-            logger.info(f"Added permanent pass for '{clean_email}'.")
-
-        return {"email": clean_email, "created_at": created_at}
 
     def remove_pass(self, email: str):
         """Removes any temporary or permanent pass for an email."""
@@ -175,10 +154,6 @@ class GrantService:
         
         data["temporary_passes"] = [
             p for p in data.get("temporary_passes", []) 
-            if self._get_pass_email(p) != clean_email
-        ]
-        data["permanent_passes"] = [
-            p for p in data.get("permanent_passes", []) 
             if self._get_pass_email(p) != clean_email
         ]
         self._save_data(data)
@@ -226,13 +201,6 @@ class GrantService:
                 if dt_expires and dt_expires > now:
                     return True
         return False
-
-    def is_permanently_allowed(self, email: str) -> bool:
-        """Checks if an email is registered on the permanent passes whitelist."""
-        clean_email = email.strip().lower()
-        data = self._load_data()
-        existing_perm = [self._get_pass_email(p) for p in data.get("permanent_passes", [])]
-        return clean_email in existing_perm
 
     def get_expired_temporary_passes(
         self,

@@ -17,7 +17,6 @@ def test_handle_grant_permanent_without_name():
         dry_run=False
     )
 
-    mock_grant.add_permanent_pass.assert_called_once_with(email="testperm@example.com")
     mock_plex.grant_user_access.assert_called_once_with(email="testperm@example.com", dry_run=False)
     mock_zoho.create_customer.assert_not_called()
     mock_zoho.create_recurring_invoice.assert_not_called()
@@ -40,5 +39,4 @@ def test_handle_grant_permanent_with_name():
 
     mock_zoho.create_customer.assert_called_once_with(contact_name="John Permanent", email="testperm2@example.com", currency_code="GTQ")
     mock_zoho.create_recurring_invoice.assert_called_once()
-    mock_grant.add_permanent_pass.assert_called_once_with(email="testperm2@example.com")
     mock_plex.grant_user_access.assert_called_once_with(email="testperm2@example.com", dry_run=False)
