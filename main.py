@@ -506,6 +506,7 @@ def main():
 
             # Process 20+ days overdue invoices (Void invoice with "No Renovó" + Stop recurring invoice)
             details = user_info.get("overdue_invoices_details", [])
+            voided_invoices = []
             for inv_detail in details:
                 days_ov = inv_detail.get("days_overdue", 0)
                 inv_id = inv_detail.get("invoice_id")
@@ -516,10 +517,13 @@ def main():
                     logger.info(f"Invoice #{inv_num} is {days_ov} days overdue (>= {config.VOID_OVERDUE_DAYS_THRESHOLD} days). Voiding invoice and stopping recurring invoice...")
                     if args.dry_run:
                         logger.info(f"[DRY-RUN] Would mark invoice #{inv_num} (ID: {inv_id}) as VOID ('No Renovó') and STOP recurring invoice for customer {cust_id}.")
+                        voided_invoices.append(f"#{inv_num} (Dry Run)")
                     else:
+                        void_success = False
                         if inv_id:
                             try:
                                 zoho_service.void_invoice(invoice_id=inv_id, reason="No Renovó")
+                                void_success = True
                             except Exception as e:
                                 logger.error(f"Failed to void invoice #{inv_num}: {e}")
                         if cust_id:
@@ -527,15 +531,24 @@ def main():
                                 zoho_service.stop_recurring_invoices_for_customer(customer_id=cust_id)
                             except Exception as e:
                                 logger.error(f"Failed to stop recurring invoice for customer {cust_id}: {e}")
+                        
+                        if void_success:
+                            voided_invoices.append(f"#{inv_num} (Voided)")
+                        else:
+                            voided_invoices.append(f"#{inv_num} (Void Failed)")
 
             result = plex_service.revoke_user_access(email=email, dry_run=args.dry_run)
+            
+            action_text = result["action"]
+            if voided_invoices:
+                action_text += f" | Anulada: {', '.join(voided_invoices)}"
 
             log_disabled_user(
                 email=email,
                 customer_name=customer_name,
                 invoice_numbers=invoice_numbers,
                 max_days_overdue=max_days,
-                action=result["action"],
+                action=action_text,
                 status=result["status"],
                 dry_run=args.dry_run
             )
@@ -553,7 +566,7 @@ def main():
                 "email": email,
                 "customer": customer_name,
                 "status": result["status"],
-                "action": result["action"]
+                "action": action_text
             })
     else:
         logger.info("No overdue users requiring access revocation today. Sync complete.")
